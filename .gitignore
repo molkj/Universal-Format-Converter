@@ -1,0 +1,17 @@
+# 构建产物
+build/
+dist/
+*.spec.bak
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 打包生成的 exe / 本地预览图
+*.exe
+界面预览.png
+
+# 日志 / 临时
+*.log
+.workbuddy/

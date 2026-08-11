@@ -1,0 +1,80 @@
+# -*- mode: python ; coding: utf-8 -*-
+# PyInstaller 打包配置：万能格式转换器
+
+import os
+
+block_cipher = None
+
+# 项目根目录
+ROOT = os.path.abspath(SPECPATH)
+
+a = Analysis(
+    ["main.py"],
+    pathex=[ROOT],
+    binaries=[],
+    datas=[
+        # 捆绑 ffmpeg（音视频转换引擎）
+        (os.path.join(ROOT, "build", "ffmpeg", "bin", "ffmpeg.exe"), "ffmpeg"),
+        # 应用图标
+        (os.path.join(ROOT, "assets", "app.ico"), "assets"),
+        (os.path.join(ROOT, "assets", "app.png"), "assets"),
+        (os.path.join(ROOT, "assets", "check.png"), "assets"),
+    ],
+    hiddenimports=[
+        "win32com", "win32com.client", "win32com.client.gencache",
+        "pythoncom",
+        "PIL._tkinter_finder",
+        "openpyxl", "openpyxl.cell._writer",
+        "pdf2docx",
+    ],
+    hookspath=[os.path.join(ROOT, "hooks")],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+# ---------------------------------------------------------------------------
+# 体积优化：排除用不到的二进制（不影响任何已支持的功能）
+# ---------------------------------------------------------------------------
+_EXCLUDE_BIN_MARKERS = [
+    "cv2/opencv_videoio_ffmpeg",  # opencv 视频读写 DLL（pdf2docx 仅用图像处理）
+    "opengl32sw",                 # Qt 软件 OpenGL 渲染器（界面用 raster 渲染）
+    "Qt6Quick", "Qt6Qml", "Qt6Pdf",  # 用不到的 QML/PDF 模块
+    "_avif",                      # Pillow 的 AVIF 编码支持（未列入转换格式）
+]
+if hasattr(a, "binaries"):
+    _before = len(a.binaries)
+    a.binaries = TOC([
+        b for b in a.binaries
+        if not any(m in b[0].replace("\\", "/") for m in _EXCLUDE_BIN_MARKERS)
+    ])
+    print(f"[体积优化] 二进制过滤：{_before} → {len(a.binaries)} 项")
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name="万能格式转换器",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=os.path.join(ROOT, "assets", "app.ico"),
+)
