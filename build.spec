@@ -18,7 +18,6 @@ a = Analysis(
         # 应用图标
         (os.path.join(ROOT, "assets", "app.ico"), "assets"),
         (os.path.join(ROOT, "assets", "app.png"), "assets"),
-        (os.path.join(ROOT, "assets", "check.png"), "assets"),
     ],
     hiddenimports=[
         "win32com", "win32com.client", "win32com.client.gencache",
