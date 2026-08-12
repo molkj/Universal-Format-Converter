@@ -17,13 +17,14 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QTableWidget, QTableWidgetItem, QComboBox,
     QProgressBar, QTextEdit, QFileDialog, QMessageBox, QHeaderView,
     QAbstractItemView, QFrame, QMenu, QLineEdit, QDialog, QListWidget,
-    QDialogButtonBox, QSizePolicy, QGraphicsDropShadowEffect,
+    QDialogButtonBox, QSizePolicy, QGraphicsDropShadowEffect, QSpinBox,
 )
 
 from converter import get_available_targets, convert_file, SUPPORTED_SUMMARY
 from converter.utils import ConverterError, CancelledError, ensure_dir
+from converter.image import merge_images_to_pdf
 
-APP_NAME = "万能格式转换器"
+APP_NAME = "文件转换助手"
 APP_VERSION = "1.2.0"
 
 
@@ -213,6 +214,39 @@ class BatchTargetDialog(QDialog):
             text = item.text()
             self.choice = text[text.rfind("（.") + 2:-1]
         super().accept()
+
+
+class SettingsDialog(QDialog):
+    """轻量设置面板：并发数 / GPU 硬件加速"""
+
+    def __init__(self, max_threads: int, hw_accel: bool, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("设置")
+        self.setFixedWidth(340)
+        lay = QVBoxLayout(self)
+        lay.setSpacing(14)
+
+        # 并发数
+        lay.addWidget(QLabel("同时转换的任务数（并发）"))
+        self.spin_threads = QSpinBox()
+        self.spin_threads.setRange(1, 8)
+        self.spin_threads.setValue(max_threads)
+        lay.addWidget(self.spin_threads)
+
+        # GPU 硬件加速
+        self.chk_hw = CheckBoxWithLabel("视频转换使用 GPU 硬件加速（无 GPU 自动回退 CPU）",
+                                        checked=hw_accel)
+        self.chk_hw.setCursor(Qt.PointingHandCursor)
+        lay.addWidget(self.chk_hw)
+
+        lay.addStretch(1)
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        lay.addWidget(btns)
+
+    def values(self) -> tuple[int, bool]:
+        return self.spin_threads.value(), self.chk_hw.isChecked()
 
 
 # ---------------------------------------------------------------------------
@@ -433,6 +467,7 @@ class _TaskRunner(QRunnable):
         self.row = row
         self.out_dir = out_dir
         self.cancel_event = cancel_event
+        self.hw_accel = True  # 由主窗口设置面板控制
 
     def run(self):
         if self.cancel_event.is_set():
@@ -444,7 +479,7 @@ class _TaskRunner(QRunnable):
                 self.task.src, self.task.target, self.out_dir,
                 progress=lambda d, t, m: self.signals.progress.emit(
                     self.row, d, t, m),
-                opts={"gif_fps": 10},
+                opts={"gif_fps": 10, "hw_accel": self.hw_accel},
                 cancel_event=self.cancel_event)
             self.task.outputs = outputs
             self.signals.task_finished.emit(self.row, True, "完成")
@@ -472,6 +507,8 @@ class MainWindow(QMainWindow):
         self._tasks_total: int = 0
         self._tasks_done: int = 0
         self.out_dir = self._load_out_dir()
+        # 用户设置（并发数 / GPU 硬件加速），QSettings 持久化
+        self._max_threads, self._hw_accel = self._load_settings()
         self.log_lines = 0
         self._current_row = -1
         self._inline_progress: InlineProgress | None = None
@@ -544,14 +581,17 @@ class MainWindow(QMainWindow):
         self.btn_add_files = HeaderButton("＋ 添加文件", primary=True)
         self.btn_add_folder = HeaderButton("＋ 添加文件夹")
         self.btn_batch = HeaderButton("⚙ 批量设置格式")
+        self.btn_merge_pdf = HeaderButton("📄 图片合并为 PDF")
         self.btn_clear = HeaderButton("🗑 清空")
         self.btn_add_files.clicked.connect(self._add_files)
         self.btn_add_folder.clicked.connect(self._add_folder)
         self.btn_batch.clicked.connect(self._batch_set_target)
+        self.btn_merge_pdf.clicked.connect(self._merge_images_to_pdf)
         self.btn_clear.clicked.connect(self._clear_tasks)
         toolbar.addWidget(self.btn_add_files)
         toolbar.addWidget(self.btn_add_folder)
         toolbar.addWidget(self.btn_batch)
+        toolbar.addWidget(self.btn_merge_pdf)
         toolbar.addWidget(self.btn_clear)
         toolbar.addStretch(1)
         self.lbl_summary = QLabel("共 0 个任务")
@@ -663,6 +703,20 @@ class MainWindow(QMainWindow):
         self.chk_auto_open.setCursor(Qt.PointingHandCursor)
         ctrl.addSpacing(16)
         ctrl.addWidget(self.chk_auto_open)
+        # 转换完成后把成功输出打包为 ZIP
+        self.chk_pack_zip = CheckBoxWithLabel("完成后打包 ZIP", checked=False)
+        self.chk_pack_zip.setCursor(Qt.PointingHandCursor)
+        ctrl.addSpacing(12)
+        ctrl.addWidget(self.chk_pack_zip)
+        # 设置面板
+        self.btn_settings = QPushButton("⚙ 设置")
+        self.btn_settings.setStyleSheet(
+            f"QPushButton{{background:white; color:{C_TEXT_SUB};"
+            f"border:1px solid {C_BORDER}; border-radius:6px; padding:6px 12px;}}"
+            f"QPushButton:hover{{border-color:{C_PRIMARY}; color:{C_PRIMARY};}}")
+        self.btn_settings.clicked.connect(self._open_settings)
+        ctrl.addSpacing(12)
+        ctrl.addWidget(self.btn_settings)
         ctrl.addStretch(1)
         self.btn_log_toggle = QPushButton("📋 显示日志")
         self.btn_log_toggle.setCheckable(True)
@@ -868,6 +922,46 @@ class MainWindow(QMainWindow):
         self._refresh_table()
         self.log("已清空任务列表")
 
+    def _merge_images_to_pdf(self):
+        """把勾选的图片按顺序合并为一个 PDF"""
+        if self._is_busy():
+            QMessageBox.information(self, "提示", "转换进行中，请先取消或等待完成。")
+            return
+        IMG_EXTS = {"png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "ico"}
+        imgs = [
+            t.src for t in self.tasks
+            if t.checked and os.path.splitext(t.src)[1].lstrip(".").lower() in IMG_EXTS
+        ]
+        if not imgs:
+            QMessageBox.information(
+                self, "提示", "请先勾选要合并的图片（PNG/JPG/WebP/GIF/BMP/TIFF/ICO）。")
+            return
+        default = os.path.join(
+            self.out_dir, f"合并图片_{time.strftime('%Y%m%d_%H%M%S')}.pdf")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存合并的 PDF", default, "PDF 文件 (*.pdf)")
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        ensure_dir(self.out_dir)
+        self.log(f"📄 合并 {len(imgs)} 张图片 → {os.path.basename(path)}")
+        try:
+            merge_images_to_pdf(
+                imgs, path,
+                lambda d, t, m: self._merge_progress(d, t, m))
+            self.log(f"✅ 已生成：{path}")
+            QMessageBox.information(self, "完成", f"PDF 已生成：\n{path}")
+        except ConverterError as e:
+            QMessageBox.warning(self, "合并失败", str(e))
+            self.log(f"✘ 合并失败：{e}")
+
+    def _merge_progress(self, done: int, total: int, message: str):
+        total = max(1, total)
+        pct = min(100, int(done * 100 / total))
+        self.progress.setValue(pct)
+        self.progress_label.setText(message)
+
     def _remove_selected(self):
         if self._is_busy():
             return
@@ -878,11 +972,11 @@ class MainWindow(QMainWindow):
         self._refresh_table()
 
     def _batch_set_target(self):
-        # 优先使用选中行；没有选中行时自动对所有已勾选任务生效
-        # （表格大部分区域是下拉框/勾选框 cellWidget，点击不会选中行）
-        rows = sorted({i.row() for i in self.table.selectedIndexes()})
+        # 优先对所有已勾选任务生效（与「开始转换」一致，勾选即明确意图）；
+        # 没有勾选时才回退到选中行
+        rows = [i for i, t in enumerate(self.tasks) if t.checked]
         if not rows:
-            rows = [i for i, t in enumerate(self.tasks) if t.checked]
+            rows = sorted({i.row() for i in self.table.selectedIndexes()})
         if not rows:
             QMessageBox.information(
                 self, "提示", "请先勾选要设置格式的文件（或直接选中行）。")
@@ -1092,6 +1186,33 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001
             pass
 
+    def _load_settings(self) -> tuple[int, bool]:
+        """读取用户设置：并发数 / GPU 硬件加速"""
+        try:
+            s = QSettings("molkj", "UniversalFormatConverter")
+            threads = int(s.value("max_threads", 4))
+            hw = str(s.value("hw_accel", "1")) not in ("0", "false", "False")
+            return max(1, min(8, threads)), hw
+        except Exception:  # noqa: BLE001
+            return 4, True
+
+    def _open_settings(self):
+        dlg = SettingsDialog(self._max_threads, self._hw_accel, self)
+        if dlg.exec() == QDialog.Accepted:
+            threads, hw = dlg.values()
+            self._max_threads, self._hw_accel = threads, hw
+            try:
+                s = QSettings("molkj", "UniversalFormatConverter")
+                s.setValue("max_threads", threads)
+                s.setValue("hw_accel", "1" if hw else "0")
+            except Exception:  # noqa: BLE001
+                pass
+            self.log(f"⚙ 设置已更新：并发 {threads}，"
+                     f"GPU 硬件加速 {'开' if hw else '关'}")
+            # 硬件加速开关变化时清除检测缓存
+            from converter.media import reset_hw_cache
+            reset_hw_cache()
+
     def _pick_out_dir(self):
         d = QFileDialog.getExistingDirectory(self, "选择输出目录", self.out_dir)
         if d:
@@ -1126,6 +1247,9 @@ class MainWindow(QMainWindow):
             return
         run_tasks = [self.tasks[i] for i in run_rows]
 
+        # 记录本次转换的任务（打包 ZIP 时只打包本次输出，避免累积重复）
+        self._run_tasks = run_tasks
+
         # 去重：检查输出文件是否会冲突（同一 src 不会出现两次，因为 _add_paths 去重）
         # 但多任务同一 src 的风险仍存在；下面 _add_paths 已保证，所以这里不再额外检查
 
@@ -1154,15 +1278,17 @@ class MainWindow(QMainWindow):
         self._tasks_total = len(run_tasks)
         self._tasks_done = 0
 
-        # 限制并发数（避免 CPU 过载/资源耗尽）
+        # 限制并发数（避免 CPU 过载/资源耗尽，用户可在设置中调整）
         self._pool = QThreadPool.globalInstance()
-        max_threads = min(4, self._pool.maxThreadCount(), self._tasks_total)
+        max_threads = min(self._max_threads, self._pool.maxThreadCount(),
+                          self._tasks_total)
         self._pool.setMaxThreadCount(max_threads)
 
         # 提交所有任务
         for task, row in zip(run_tasks, run_rows):
             runner = _TaskRunner(self._signals, task, row,
                                  self.out_dir, self._cancel_event)
+            runner.hw_accel = self._hw_accel
             self._pool.start(runner)
 
     def _cancel(self):
@@ -1297,6 +1423,11 @@ class MainWindow(QMainWindow):
             self.progress_label.setText(f"全部完成，{ok} 个任务成功 ✅")
         self.log(f"═══ 转换结束：成功 {ok}，失败 {fail} ═══")
         self._update_summary()
+        # 可选：把本次成功输出打包为 ZIP
+        if ok and self.chk_pack_zip.isChecked():
+            zip_path = self._pack_outputs_to_zip()
+            if zip_path:
+                self.log(f"📦 已打包：{zip_path}")
         # 按用户预设：全部成功时自动打开输出目录（不弹窗打扰）
         if ok and not fail and self.chk_auto_open.isChecked():
             self._open_out_dir()
@@ -1304,6 +1435,41 @@ class MainWindow(QMainWindow):
         self._pool = None
         self._signals = None
         self._cancel_event = None
+
+    def _pack_outputs_to_zip(self) -> str | None:
+        """把本次转换的成功输出打包成 ZIP（固定名覆盖），打包后清理散文件。
+
+        只打包本次转换产生的输出（避免多次转换累积重复文件）；
+        打包成功后删除输出目录中的散文件，只保留一个 zip。"""
+        import zipfile
+        outputs = []
+        for t in getattr(self, "_run_tasks", []):
+            if t.status == "成功":
+                outputs.extend(t.outputs)
+        if not outputs:
+            return None
+        # 固定文件名：每次转换覆盖旧包，输出目录始终只有一个 zip
+        zip_path = os.path.join(self.out_dir, "文件转换结果.zip")
+        try:
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for p in outputs:
+                    if os.path.isfile(p):
+                        zf.write(p, os.path.basename(p))
+        except OSError as e:
+            self.log(f"⚠ 打包失败：{e}")
+            return None
+        # 打包成功：删除散文件，只留 zip
+        removed = 0
+        for p in outputs:
+            try:
+                if os.path.isfile(p) and os.path.abspath(p) != os.path.abspath(zip_path):
+                    os.remove(p)
+                    removed += 1
+            except OSError:
+                pass
+        if removed:
+            self.log(f"🗑 已清理 {removed} 个散文件（已收进 zip）")
+        return zip_path
 
     # ------------------------- 日志 -------------------------
 

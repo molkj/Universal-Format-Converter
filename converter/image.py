@@ -88,6 +88,49 @@ def convert_image(src: str, target_ext: str, out_path: str, progress: Progress):
     return out_path
 
 
+def merge_images_to_pdf(src_paths: list[str], out_path: str,
+                        progress=None) -> str:
+    """把多张图片按顺序合并为一个 PDF。
+
+    src_paths: 图片路径列表（按此顺序排列）
+    out_path: 输出 PDF 路径
+    progress: 进度回调 (done, total, message)
+    返回输出路径。"""
+    from PIL import Image
+
+    progress = Progress(progress)
+    if not src_paths:
+        raise ConverterError("没有可合并的图片。")
+    images = []
+    try:
+        for i, p in enumerate(src_paths):
+            progress.report(i, len(src_paths), f"读取 {os.path.basename(p)}")
+            img = Image.open(p)
+            # 统一转 RGB（PDF 不支持 RGBA/P 模式）
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            images.append(img)
+        progress.report(len(src_paths), len(src_paths), "生成 PDF…")
+        if len(images) == 1:
+            images[0].save(out_path, "PDF", resolution=100.0)
+        else:
+            first, rest = images[0], images[1:]
+            first.save(out_path, "PDF", resolution=100.0, save_all=True,
+                       append_images=rest)
+        progress.report(100, 100, "PDF 已生成")
+        return out_path
+    except ConverterError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise ConverterError(f"合并 PDF 失败：{e}") from e
+    finally:
+        for im in images:
+            try:
+                im.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def register(registry):
     for src_ext, targets in IMAGE_TARGETS.items():
         for tgt in targets:

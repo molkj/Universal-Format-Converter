@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller 打包配置：万能格式转换器
+# PyInstaller 打包配置：文件转换助手
 
 import os
 
@@ -76,7 +76,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="万能格式转换器",
+    name="文件转换助手",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

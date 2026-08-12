@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>万能格式转换器</title>
+<title>文件转换助手</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
@@ -104,7 +104,7 @@
 <div class="header">
   <div class="logo">⇄</div>
   <div>
-    <h1>万能格式转换器</h1>
+    <h1>文件转换助手</h1>
     <p>手机端 · 图片批量转换 · 全部在本地完成</p>
   </div>
 </div>
@@ -157,7 +157,7 @@
 
   <div class="tip">
     所有转换均在本机完成，图片不会上传。<br>
-    转换结果自动保存到「相册 / 万能格式转换器」文件夹。
+    转换结果自动保存到「相册 / 文件转换助手」文件夹。
   </div>
 </div>
 
@@ -268,7 +268,7 @@
       var ok = queue.filter(function (x) { return x.status === "done"; }).length;
       progressText.textContent = "完成 " + ok + "/" + queue.length + " 张 ✓";
       progressBar.style.width = "100%";
-      showBanner("转换完成，结果已保存到「相册/万能格式转换器」", "#dcfce7", "#166534");
+      showBanner("转换完成，结果已保存到「相册/文件转换助手」", "#dcfce7", "#166534");
       return;
     }
     var it = queue[idx];

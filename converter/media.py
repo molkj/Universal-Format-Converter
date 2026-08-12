@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 
 from .utils import (
     ConverterError,
@@ -69,6 +70,55 @@ def _ffmpeg() -> str:
     return path
 
 
+# 硬件加速：可用 H.264 编码器缓存（NVIDIA / AMD / Intel 优先级）
+_HW_CACHE: list[str] | None = None
+_HW_LOCK = threading.Lock()
+
+
+def detect_hw_h264() -> list[str]:
+    """检测可用的 H.264 硬件编码器（实测跑通才返回），结果缓存。
+
+    无 GPU / 驱动缺失时返回 []，调用方自动回退 CPU（libx264）。"""
+    global _HW_CACHE
+    if _HW_CACHE is not None:
+        return _HW_CACHE
+    with _HW_LOCK:
+        if _HW_CACHE is not None:
+            return _HW_CACHE
+        try:
+            ffmpeg = _ffmpeg()
+            out = subprocess.run(
+                [ffmpeg, "-hide_banner", "-encoders"],
+                capture_output=True, text=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW).stdout
+        except Exception:  # noqa: BLE001
+            _HW_CACHE = []
+            return []
+        available = []
+        for enc in ("h264_nvenc", "h264_amf", "h264_qsv"):
+            if enc not in out:
+                continue
+            try:
+                r = subprocess.run(
+                    [ffmpeg, "-y", "-f", "lavfi",
+                     "-i", "testsrc=duration=0.5:size=128x128:rate=5",
+                     "-c:v", enc, "-t", "0.4", "-f", "null", "-"],
+                    capture_output=True, text=True, timeout=15,
+                    creationflags=subprocess.CREATE_NO_WINDOW)
+                if r.returncode == 0:
+                    available.append(enc)
+            except Exception:  # noqa: BLE001
+                pass
+        _HW_CACHE = available
+        return available
+
+
+def reset_hw_cache():
+    """清除硬件检测缓存（设置变更时调用）"""
+    global _HW_CACHE
+    _HW_CACHE = None
+
+
 def _probe_duration(ffmpeg: str, src: str) -> float | None:
     try:
         out = subprocess.run(
@@ -116,9 +166,7 @@ def convert_media(src: str, target_ext: str, out_path: str, progress: Progress,
     opts = opts or {}
     ffmpeg = _ffmpeg()
     src_ext = src.rsplit(".", 1)[-1].lower()
-    label = f"{src_ext.upper()} → {target_ext.upper()}"
-
-    # 视频 -> 图片（提取封面帧）
+    label = f"{src_ext.upper()} → {target_ext.upper()}"    # 视频 -> 图片（提取封面帧）
     if target_ext in ("jpg", "jpeg", "png"):
         cmd = [
             ffmpeg, "-y", "-i", src, "-frames:v", "1",
@@ -151,13 +199,38 @@ def convert_media(src: str, target_ext: str, out_path: str, progress: Progress,
             return out_path
         if target_ext in VIDEO_TARGETS and target_ext not in VIDEO_TARGETS.get(src_ext, []):
             pass
-        # 视频容器互转
+        # 视频容器互转（libx264 目标支持 GPU 硬件加速，失败自动回退 CPU）
         vcodec, acodec, _ = _VIDEO_CONTAINERS.get(target_ext, ("libx264", "aac", "mp4"))
+        use_hw = False
+        if vcodec == "libx264" and opts.get("hw_accel", True):
+            hw = detect_hw_h264()
+            if hw:
+                use_hw = True
+                vcodec = hw[0]
         cmd = [ffmpeg, "-y", "-i", src, "-c:v", vcodec]
         if acodec:
             cmd += ["-c:a", acodec]
-        cmd += ["-movflags", "+faststart", "-preset", "medium", "-crf", "21", out_path]
-        _run_ffmpeg(cmd, src, progress, label)
+        if use_hw:
+            # 硬件编码器参数（码率控制；nvenc/amf/qsv 通用）
+            cmd += ["-movflags", "+faststart", "-b:v", "8M", "-maxrate", "12M",
+                    "-bufsize", "16M"]
+        else:
+            cmd += ["-movflags", "+faststart", "-preset", "medium", "-crf", "21"]
+        cmd.append(out_path)
+        try:
+            _run_ffmpeg(cmd, src, progress, label)
+        except InterruptedError:
+            raise
+        except ConverterError:
+            if not use_hw:
+                raise
+            # 硬件编码失败（驱动/会话问题）→ 回退 CPU libx264
+            cmd = [ffmpeg, "-y", "-i", src, "-c:v", "libx264"]
+            if acodec:
+                cmd += ["-c:a", acodec]
+            cmd += ["-movflags", "+faststart", "-preset", "medium",
+                    "-crf", "21", out_path]
+            _run_ffmpeg(cmd, src, progress, label)
         return out_path
 
     if src_ext in AUDIO_TARGETS:
