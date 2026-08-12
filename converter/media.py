@@ -16,15 +16,15 @@ from .utils import (
 
 # 视频源格式 -> 目标格式
 VIDEO_TARGETS = {
-    "mp4": ["mkv", "avi", "mov", "webm", "flv", "gif", "mp3", "wav", "m4a", "jpg"],
-    "mkv": ["mp4", "avi", "mov", "webm", "flv", "gif", "mp3", "wav", "m4a", "jpg"],
-    "avi": ["mp4", "mkv", "mov", "webm", "flv", "gif", "mp3", "wav", "m4a", "jpg"],
-    "mov": ["mp4", "mkv", "avi", "webm", "flv", "gif", "mp3", "wav", "m4a", "jpg"],
-    "webm": ["mp4", "mkv", "avi", "mov", "flv", "gif", "mp3", "wav", "m4a", "jpg"],
-    "flv": ["mp4", "mkv", "avi", "mov", "webm", "gif", "mp3", "wav", "m4a", "jpg"],
+    "mp4": ["mkv", "avi", "mov", "webm", "flv", "wmv", "gif", "mp3", "wav", "m4a", "jpg"],
+    "mkv": ["mp4", "avi", "mov", "webm", "flv", "wmv", "gif", "mp3", "wav", "m4a", "jpg"],
+    "avi": ["mp4", "mkv", "mov", "webm", "flv", "wmv", "gif", "mp3", "wav", "m4a", "jpg"],
+    "mov": ["mp4", "mkv", "avi", "webm", "flv", "wmv", "gif", "mp3", "wav", "m4a", "jpg"],
+    "webm": ["mp4", "mkv", "avi", "mov", "flv", "wmv", "gif", "mp3", "wav", "m4a", "jpg"],
+    "flv": ["mp4", "mkv", "avi", "mov", "webm", "wmv", "gif", "mp3", "wav", "m4a", "jpg"],
     "wmv": ["mp4", "mkv", "avi", "mov", "webm", "gif", "mp3", "wav", "m4a", "jpg"],
-    "m4v": ["mp4", "mkv", "avi", "mov", "webm", "gif", "mp3", "wav", "m4a", "jpg"],
-    "mts": ["mp4", "mkv", "avi", "mov", "webm"],
+    "m4v": ["mp4", "mkv", "avi", "mov", "webm", "wmv", "gif", "mp3", "wav", "m4a", "jpg"],
+    "mts": ["mp4", "mkv", "avi", "mov", "webm", "wmv"],
 }
 
 # 音频源格式 -> 目标格式
@@ -99,6 +99,7 @@ def _run_ffmpeg(cmd: list[str], src: str, progress: Progress, label: str):
     for line in iter(proc.stdout.readline, ""):
         if progress.cancelled:
             proc.kill()
+            proc.wait()  # 等进程退出、释放文件句柄，避免残留半成品删不掉
             raise InterruptedError
         t = parse_ffmpeg_time(line)
         if t is not None and duration:

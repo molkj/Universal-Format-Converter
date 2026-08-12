@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import threading
 import time
 
-from PySide6.QtCore import Qt, QThread, Signal, QSize, QUrl, QPoint, QRect, QEvent, QObject, QRunnable, QThreadPool
+from PySide6.QtCore import Qt, QThread, Signal, QSize, QUrl, QPoint, QRect, QEvent, QObject, QRunnable, QThreadPool, QSettings
 from PySide6.QtGui import (
     QColor, QFont, QDesktopServices, QDragEnterEvent, QDropEvent, QAction,
     QIcon, QPixmap, QShortcut, QKeySequence, QPen, QBrush, QPainterPath,
@@ -410,6 +411,7 @@ class TaskItem:
         self.message = ""
         self.outputs: list[str] = []
         self.checked = True   # 是否参与本次转换
+        self._out_snapshot: set[str] | None = None  # 转换开始时输出目录快照（用于取消清理）
 
 
 class _TaskSignals(QObject):
@@ -442,7 +444,8 @@ class _TaskRunner(QRunnable):
                 self.task.src, self.task.target, self.out_dir,
                 progress=lambda d, t, m: self.signals.progress.emit(
                     self.row, d, t, m),
-                opts={"gif_fps": 10})
+                opts={"gif_fps": 10},
+                cancel_event=self.cancel_event)
             self.task.outputs = outputs
             self.signals.task_finished.emit(self.row, True, "完成")
         except (CancelledError, InterruptedError):
@@ -468,7 +471,7 @@ class MainWindow(QMainWindow):
         self._pool: QThreadPool | None = None
         self._tasks_total: int = 0
         self._tasks_done: int = 0
-        self.out_dir = os.path.join(os.path.expanduser("~"), "Documents", "格式转换输出")
+        self.out_dir = self._load_out_dir()
         self.log_lines = 0
         self._current_row = -1
         self._inline_progress: InlineProgress | None = None
@@ -1072,12 +1075,30 @@ class MainWindow(QMainWindow):
 
     # ------------------------- 输出目录 -------------------------
 
+    def _load_out_dir(self) -> str:
+        """读取上次选择的输出目录（QSettings 持久化），不存在则用默认"""
+        try:
+            saved = QSettings("molkj", "UniversalFormatConverter").value("out_dir", "")
+            if saved and os.path.isdir(saved):
+                return saved
+        except Exception:  # noqa: BLE001
+            pass
+        return os.path.join(os.path.expanduser("~"), "Documents", "格式转换输出")
+
+    def _save_out_dir(self):
+        """记住输出目录，下次启动恢复"""
+        try:
+            QSettings("molkj", "UniversalFormatConverter").setValue("out_dir", self.out_dir)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _pick_out_dir(self):
         d = QFileDialog.getExistingDirectory(self, "选择输出目录", self.out_dir)
         if d:
             self.out_dir = d
             self.out_dir_edit.setText(d)
             ensure_dir(d)
+            self._save_out_dir()  # 记忆上次选择的输出目录
 
     def _open_out_dir(self):
         ensure_dir(self.out_dir)
@@ -1151,6 +1172,8 @@ class MainWindow(QMainWindow):
 
     def _on_task_started(self, row: int):
         t = self.tasks[row]
+        # 记录输出目录快照：取消时只删除本次新建的文件（避免误删历史成功文件）
+        t._out_snapshot = self._match_task_outputs(t)
         # 行内进度条（每行独立 widget）
         progress = InlineProgress()
         self.table.setCellWidget(row, self.COL_STATUS, progress)
@@ -1171,6 +1194,11 @@ class MainWindow(QMainWindow):
         t = self.tasks[row]
         t.status = "成功" if ok else ("已取消" if msg == "已取消" else "失败")
         t.message = msg
+        # 取消：删除本次转换生成的未完成文件（只删快照之后新建的）
+        if msg == "已取消":
+            removed = self._cleanup_cancelled(t)
+            if removed:
+                self.log(f"🗑 已删除未完成的输出：{removed}")
         # 恢复徽章
         self.table.removeCellWidget(row, self.COL_STATUS)
         self.table.setCellWidget(row, self.COL_STATUS, StatusBadge(t.status))
@@ -1200,6 +1228,40 @@ class MainWindow(QMainWindow):
         self._tasks_done += 1
         if self._tasks_done >= self._tasks_total:
             self._on_pool_done_local()
+
+    def _match_task_outputs(self, task: TaskItem) -> set[str]:
+        """输出目录中与任务匹配的候选文件：stem.ext 及 stem (N).ext"""
+        name = os.path.splitext(os.path.basename(task.src))[0]
+        pat = re.compile(
+            r"^" + re.escape(name) + r"(?: \(\d+\))?\."
+            + re.escape(task.target) + r"$", re.IGNORECASE)
+        try:
+            return {
+                os.path.join(self.out_dir, f)
+                for f in os.listdir(self.out_dir)
+                if pat.match(f)
+            }
+        except OSError:
+            return set()
+
+    def _cleanup_cancelled(self, task: TaskItem) -> str:
+        """删除取消任务本次新建的输出文件（当前匹配 - 转换前快照）"""
+        if task._out_snapshot is None:
+            return ""
+        now = self._match_task_outputs(task)
+        removed = []
+        for p in sorted(now - task._out_snapshot):
+            # 进程刚被 kill 可能还占用文件句柄，重试几次等待释放
+            for _attempt in range(6):
+                try:
+                    if os.path.isfile(p):
+                        os.remove(p)
+                    removed.append(os.path.basename(p))
+                    break
+                except OSError:
+                    time.sleep(0.25)
+        task._out_snapshot = None
+        return ", ".join(removed)
 
     def _on_progress(self, row: int, done: int, total: int, message: str):
         total = max(1, total)
@@ -1265,7 +1327,8 @@ class MainWindow(QMainWindow):
             if ret != QMessageBox.Yes:
                 event.ignore()
                 return
-            self._cancel_event.set()
+            if self._cancel_event:
+                self._cancel_event.set()
             # 等待线程池完成（最长 5s，防止某些 convert 卡死）
             QThreadPool.globalInstance().wait(5000)
         event.accept()

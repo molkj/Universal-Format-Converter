@@ -47,6 +47,11 @@ class Progress:
     def __init__(self, cb=None):
         self._cb = cb
         self._cancelled = False
+        self._external = None  # threading.Event：外部取消源（如用户点取消）
+
+    def set_external_cancel(self, evt):
+        """绑定外部取消事件：一旦 set，下次 report 时标记取消"""
+        self._external = evt
 
     def cancel(self):
         self._cancelled = True
@@ -56,6 +61,11 @@ class Progress:
         return self._cancelled
 
     def report(self, done: int, total: int, message: str = ""):
+        if self._external is not None and self._external.is_set():
+            # 只标记不抛：让 run_subprocess/_run_ffmpeg 的循环在下一次迭代检查
+            # progress.cancelled 并执行 kill，避免中断循环导致 ffmpeg 变孤儿进程
+            self.cancel()
+            return
         if self._cancelled:
             raise CancelledError("转换已取消")
         if self._cb:
@@ -106,6 +116,7 @@ def run_subprocess(cmd: list[str], progress: Progress, total=100, msg=""):
     for line in iter(proc.stdout.readline, ""):
         if progress.cancelled:
             proc.kill()
+            proc.wait()  # 等进程完全退出、释放文件句柄，避免残留半成品删不掉
             raise CancelledError("转换已取消")
         line = line.strip()
         if line:

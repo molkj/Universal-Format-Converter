@@ -91,7 +91,8 @@ def get_available_targets(src: str) -> list[tuple[str, str]]:
 
 
 def convert_file(src: str, target_ext: str, out_dir: str,
-                 progress=None, opts: dict | None = None) -> list[str]:
+                 progress=None, opts: dict | None = None,
+                 cancel_event=None) -> list[str]:
     """执行转换，返回输出路径列表。
 
     src: 源文件或文件夹路径
@@ -99,8 +100,12 @@ def convert_file(src: str, target_ext: str, out_dir: str,
     out_dir: 输出目录
     progress: 进度回调 (done, total, message)
     opts: 额外选项
+    cancel_event: threading.Event，外部取消源（设置后转换将被终止）
     """
     progress_obj = utils.Progress(progress)
+    if cancel_event is not None:
+        progress_obj.set_external_cancel(cancel_event)
+    src_ext = utils.get_ext(src) if os.path.isfile(src) else "文件夹"
     src_ext = utils.get_ext(src) if os.path.isfile(src) else "文件夹"
     fn = _TABLE.get(src_ext, {}).get(target_ext)
     if fn is None:
