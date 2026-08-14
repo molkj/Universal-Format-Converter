@@ -1,8 +1,6 @@
-# 文件转换助手 v1.24.0
+# 文件转换助手 v1.25.1
 
 一个**纯本地、免费、免安装**的批量文件格式转换工具。所有转换都在你自己的电脑上完成，文件不会上传到任何服务器，断网也能用。
-
-> 📱 手机版：`FileConverter-Android/` 提供了 Android Studio 项目（图片批量转换），见 [README-Android.md](FileConverter-Android/README-Android.md)
 
 ## ✨ 功能亮点
 
@@ -104,12 +102,12 @@ FileConverter/
 │   └── utils.py       # 工具函数（含取消机制）
 ├── build.spec         # PyInstaller 打包配置（体积优化：UPX + excludes）
 ├── make_icon.py       # 应用图标生成脚本
-├── FileConverter-Android/  # 手机版 Android Studio 项目
 └── assets/            # 应用图标等资源
 ```
 
 ## 更新日志
 
+- **v1.25.1**：修复取消转换时的信号竞态崩溃（RuntimeError: Signal source has been deleted）+ 源文件不存在时友好报错
 - **v1.24.0**：表格刷新性能优化——状态变化（全选/换格式/状态徽章）不再重建表格，改为增量更新 cellWidget，全选 300 行从 2.2s 降至毫秒级；全量刷新加 setUpdatesEnabled 抑制中间重绘
 - **v1.23.0**：新增 RAR 解压支持（按需检测本机 WinRAR/7-Zip/unrar，支持 RAR→文件夹 / ZIP / 7Z；RAR 为专利格式不内置引擎、只解不压）
 - **v1.22.0**：新增 3 项功能——① 剪贴板粘贴即转（截图后 Ctrl+V 直接加入列表）② 文本编码转换（GBK↔UTF-8，修复乱码 txt/CSV）③ 拖文件到 exe 图标打开即自动添加
