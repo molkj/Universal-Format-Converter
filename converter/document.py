@@ -454,7 +454,10 @@ def detect_encoding(src: str) -> str:
 
 def convert_text_encoding(src: str, out_path: str, target_enc: str,
                           progress) -> str:
-    """把文本文件转换为目标编码（utf-8 / utf-8-sig / gbk）"""
+    """把文本文件转换为目标编码（utf-8 / utf-8-sig / gbk）
+
+    目标编码无法表示的字符（如 GBK 遇 emoji）自动替换为「?」，
+    避免转换崩溃；进度消息里会提示替换数量。"""
     src_enc = detect_encoding(src)
     with open(src, "rb") as f:
         raw = f.read()
@@ -462,13 +465,21 @@ def convert_text_encoding(src: str, out_path: str, target_enc: str,
         text = raw.decode(src_enc, errors="replace")
     except Exception as e:  # noqa: BLE001
         raise ConverterError(f"读取文件编码失败（{src_enc}）：{e}") from e
-    # 统一为纯 UTF-8/GBK 再写（去除 BOM）
-    if src_enc == "utf-8-sig":
-        text = text
-    with open(out_path, "w", encoding=target_enc, newline="") as f:
+    # 统计无法用目标编码表示的字符数（如 GBK 不支持的 emoji）
+    replaced = 0
+    for ch in text:
+        try:
+            ch.encode(target_enc)
+        except UnicodeEncodeError:
+            replaced += 1
+    # 写入目标编码；不支持的字符替换为 ?（errors=replace 不崩溃）
+    with open(out_path, "w", encoding=target_enc, newline="",
+              errors="replace") as f:
         f.write(text)
     progress.report(100, 100,
-                    f"编码转换完成（{src_enc} → {target_enc}）")
+                    f"编码转换完成（{src_enc} → {target_enc}"
+                    + (f"，{replaced} 个字符无法表示已替换为 ?" if replaced else "")
+                    + "）")
     return out_path
 
 
