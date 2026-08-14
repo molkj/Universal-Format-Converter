@@ -74,16 +74,32 @@ for _ext in ("zip", "7z", "tar", "gz", "tgz"):
 
 
 def get_available_targets(src: str) -> list[tuple[str, str]]:
-    """返回 [(目标扩展名, 描述)]，按类别排序、类别内保持注册顺序（常用优先）"""
+    """返回 [(目标扩展名, 描述)]，按类别排序、类别内保持注册顺序（常用优先）
+
+    编码转换目标（utf8/gbk）按源文件实际编码动态过滤：
+    已是 UTF-8 的文件不显示「转为 UTF-8」，避免选了报错。"""
     if os.path.isdir(src):
         src_ext = "文件夹"
     else:
         src_ext = utils.get_ext(src)
     if not src_ext:
         return []
+    # 源文件当前编码（仅文本类需要）
+    src_enc = None
+    if src_ext in ("txt", "csv") and os.path.isfile(src):
+        try:
+            from .document import detect_encoding
+            src_enc = detect_encoding(src)
+        except Exception:  # noqa: BLE001
+            src_enc = None
     order = {"文档": 0, "图片": 1, "音视频": 2, "压缩包": 3}
     items = []
     for tgt, _desc in _TARGETS.get(src_ext, []):
+        # 编码目标按当前编码过滤：已是 UTF-8 只显示 GBK，反之亦然
+        if src_enc is not None and tgt in ("utf8", "gbk"):
+            is_utf8 = src_enc in ("utf-8", "utf-8-sig")
+            if (tgt == "utf8" and is_utf8) or (tgt == "gbk" and not is_utf8):
+                continue  # 已是该编码，隐藏此选项
         cat = _CATEGORY.get((src_ext, tgt), "")
         label = FORMAT_DESC.get(tgt, tgt.upper())
         items.append((order.get(cat, 9), len(items), tgt, label))
