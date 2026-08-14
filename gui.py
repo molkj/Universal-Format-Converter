@@ -96,9 +96,17 @@ class StatusBadge(QLabel):
 
     def __init__(self, text: str):
         super().__init__(text)
-        bg, fg = self.KIND.get(text, (C_WAIT_BG, C_TEXT_SUB))
         self.setAlignment(Qt.AlignCenter)
         self.setFixedHeight(22)
+        self._apply(text)
+
+    def set_status(self, text: str):
+        """增量更新状态（复用实例，避免重建 widget）"""
+        self.setText(text)
+        self._apply(text)
+
+    def _apply(self, text: str):
+        bg, fg = self.KIND.get(text, (C_WAIT_BG, C_TEXT_SUB))
         self.setStyleSheet(
             f"background:{bg}; color:{fg}; border-radius:11px;"
             f"padding:0 12px; font-weight:bold; font-size:12px;")
@@ -843,20 +851,16 @@ class MainWindow(QMainWindow):
         self.log(f"📋 已从剪贴板粘贴图片：{os.path.basename(path)}")
 
     def _check_all(self):
-        """全选勾选（快捷键 Ctrl+A）"""
+        """全选勾选（快捷键 Ctrl+A）——增量更新，不重建表格"""
         if not self.tasks:
             return
-        for t in self.tasks:
-            t.checked = True
-        self._refresh_table()
+        self._set_all_checked(True)
 
     def _check_none(self):
-        """全不选（快捷键 Ctrl+Shift+A）"""
+        """全不选（快捷键 Ctrl+Shift+A）——增量更新，不重建表格"""
         if not self.tasks:
             return
-        for t in self.tasks:
-            t.checked = False
-        self._refresh_table()
+        self._set_all_checked(False)
 
     # ------------------------- 拖拽 -------------------------
 
@@ -1043,22 +1047,54 @@ class MainWindow(QMainWindow):
         if dlg.exec() == QDialog.Accepted and dlg.choice:
             for r in rows:
                 self.tasks[r].target = dlg.choice
-            self._refresh_table()
+            # 增量更新：只改这几行的下拉框，不重建整表
+            for r in rows:
+                self._update_row_state(r)
             self.log(f"⚙ 已为 {len(rows)} 个任务设置目标格式 .{dlg.choice}")
 
     # ------------------------- 表格 -------------------------
 
     def _refresh_table(self):
+        # 结构变化（增删行）才全量重建；状态变化请用 _update_row_state
         self.table.blockSignals(True)
-        self.table.setRowCount(len(self.tasks))
-        for row, task in enumerate(self.tasks):
-            self._fill_row(row, task)
-        self.table.blockSignals(False)
+        self.table.setUpdatesEnabled(False)
+        try:
+            self.table.setRowCount(len(self.tasks))
+            for row, task in enumerate(self.tasks):
+                self._fill_row(row, task)
+        finally:
+            self.table.setUpdatesEnabled(True)
+            self.table.blockSignals(False)
         self.drag_hint.setVisible(len(self.tasks) == 0)
         if not self.tasks:
             self._center_drag_hint()
         self._update_summary()
         self._sync_header_check()
+
+    def _update_row_state(self, row: int):
+        """增量更新单行状态（复用 cellWidget，不重建，避免全量刷新开销）"""
+        if not (0 <= row < len(self.tasks)):
+            return
+        task = self.tasks[row]
+        # 勾选状态
+        cb = self.table.cellWidget(row, self.COL_CHECK)
+        if isinstance(cb, CheckBoxCell) and cb.isChecked() != task.checked:
+            cb.blockSignals(True)
+            cb.setChecked(task.checked)
+            cb.blockSignals(False)
+        # 目标格式下拉框（状态非"转换中"才可改；同步已选值）
+        combo = self.table.cellWidget(row, self.COL_TARGET)
+        if isinstance(combo, QComboBox):
+            combo.setEnabled(task.status != "转换中")
+            idx = combo.findData(task.target)
+            if idx >= 0 and combo.currentIndex() != idx:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(idx)
+                combo.blockSignals(False)
+        # 状态徽章
+        badge = self.table.cellWidget(row, self.COL_STATUS)
+        if isinstance(badge, StatusBadge):
+            badge.set_status(task.status)
 
     def _fill_row(self, row: int, task: TaskItem):
         # 勾选框：用自绘 CheckBoxCell（避免 QSS image 渲染问题，与表头同源）
@@ -1140,6 +1176,7 @@ class MainWindow(QMainWindow):
                 cb.setChecked(new_state)
                 cb.blockSignals(False)
         self._update_summary()
+        self._sync_header_check()
 
     def _update_header_cb_geometry(self):
         """让表头首列 widget 始终贴齐 section 0 的位置"""
@@ -1318,7 +1355,9 @@ class MainWindow(QMainWindow):
             if t.status != "成功":
                 t.status = "等待中"
                 t.message = ""
-        self._refresh_table()
+        # 增量更新：只刷新本次运行行的状态徽章/下拉框，不重建整表
+        for r in run_rows:
+            self._update_row_state(r)
         self.log("─" * 44)
         self.log(f"▶ 开始并发转换 {len(run_tasks)} 个任务 → {self.out_dir}")
 
