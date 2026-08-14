@@ -122,7 +122,8 @@ def convert_file(src: str, target_ext: str, out_dir: str,
     progress_obj = utils.Progress(progress)
     if cancel_event is not None:
         progress_obj.set_external_cancel(cancel_event)
-    src_ext = utils.get_ext(src) if os.path.isfile(src) else "文件夹"
+    if not os.path.exists(src):
+        raise utils.ConverterError("源文件或文件夹不存在，可能已被移动或删除。")
     src_ext = utils.get_ext(src) if os.path.isfile(src) else "文件夹"
     fn = _TABLE.get(src_ext, {}).get(target_ext)
     if fn is None:

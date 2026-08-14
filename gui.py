@@ -482,26 +482,34 @@ class _TaskRunner(QRunnable):
         self.cancel_event = cancel_event
         self.hw_accel = True  # 由主窗口设置面板控制
 
+    def _emit(self, signal, *args):
+        """安全发信号：窗口关闭/全部完成清理 _signals 后，worker 可能仍在 emit，
+        此时信号对象已被销毁会抛 RuntimeError，静默忽略即可"""
+        try:
+            signal.emit(*args)
+        except RuntimeError:
+            pass
+
     def run(self):
         if self.cancel_event.is_set():
-            self.signals.task_finished.emit(self.row, False, "已取消")
+            self._emit(self.signals.task_finished, self.row, False, "已取消")
             return
-        self.signals.task_started.emit(self.row)
+        self._emit(self.signals.task_started, self.row)
         try:
             outputs = convert_file(
                 self.task.src, self.task.target, self.out_dir,
-                progress=lambda d, t, m: self.signals.progress.emit(
-                    self.row, d, t, m),
+                progress=lambda d, t, m: self._emit(
+                    self.signals.progress, self.row, d, t, m),
                 opts={"gif_fps": 10, "hw_accel": self.hw_accel},
                 cancel_event=self.cancel_event)
             self.task.outputs = outputs
-            self.signals.task_finished.emit(self.row, True, "完成")
+            self._emit(self.signals.task_finished, self.row, True, "完成")
         except (CancelledError, InterruptedError):
-            self.signals.task_finished.emit(self.row, False, "已取消")
+            self._emit(self.signals.task_finished, self.row, False, "已取消")
         except ConverterError as e:
-            self.signals.task_finished.emit(self.row, False, str(e))
+            self._emit(self.signals.task_finished, self.row, False, str(e))
         except Exception as e:  # noqa: BLE001
-            self.signals.task_finished.emit(self.row, False, f"未知错误：{e}")
+            self._emit(self.signals.task_finished, self.row, False, f"未知错误：{e}")
 
 
 # ---------------------------------------------------------------------------
