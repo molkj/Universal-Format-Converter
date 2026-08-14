@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import Qt, QThread, Signal, QSize, QUrl, QPoint, QRect, QEvent, QObject, QRunnable, QThreadPool, QSettings
+from PySide6.QtCore import Qt, QThread, Signal, QSize, QUrl, QPoint, QRect, QEvent, QObject, QRunnable, QThreadPool, QSettings, QTimer
 from PySide6.QtGui import (
     QColor, QFont, QDesktopServices, QDragEnterEvent, QDropEvent, QAction,
     QIcon, QPixmap, QShortcut, QKeySequence, QPen, QBrush, QPainterPath,
@@ -811,6 +811,31 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Shift+A"), self, activated=self._check_none)
         QShortcut(QKeySequence("Delete"), self, activated=self._remove_selected)
         QShortcut(QKeySequence("Ctrl+O"), self, activated=self._add_files)
+        QShortcut(QKeySequence("Ctrl+V"), self, activated=self._paste_from_clipboard)
+
+    def _paste_from_clipboard(self):
+        """从剪贴板粘贴图片：保存为临时 PNG 并加入任务列表（截图党的最爱）"""
+        from PySide6.QtWidgets import QApplication as _App
+        img = _App.clipboard().image()
+        if img.isNull():
+            self.statusBar().showMessage(
+                "剪贴板中没有图片（可 Ctrl+C 复制图片后再粘贴）", 3000)
+            return
+        import tempfile
+        tmp_dir = os.path.join(tempfile.gettempdir(), "fc_paste")
+        ensure_dir(tmp_dir)
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(tmp_dir, f"剪贴板_{stamp}.png")
+        # 防止同秒多次粘贴覆盖
+        i = 1
+        while os.path.exists(path):
+            path = os.path.join(tmp_dir, f"剪贴板_{stamp}_{i}.png")
+            i += 1
+        if not img.save(path, "PNG"):
+            self.statusBar().showMessage("剪贴板图片保存失败", 3000)
+            return
+        self._add_paths([path])
+        self.log(f"📋 已从剪贴板粘贴图片：{os.path.basename(path)}")
 
     def _check_all(self):
         """全选勾选（快捷键 Ctrl+A）"""
@@ -1533,6 +1558,11 @@ def main():
     app.setApplicationDisplayName(APP_NAME)
     win = MainWindow()
     win.show()
+    # 支持「拖文件到 exe 图标上打开」：Windows 会把路径放进 argv[1:]
+    # 窗口显示后再添加，确保列表/状态就绪
+    drop_paths = [a for a in sys.argv[1:] if os.path.exists(a)]
+    if drop_paths:
+        QTimer.singleShot(150, lambda: win._add_paths(drop_paths))
     sys.exit(app.exec())
 
 

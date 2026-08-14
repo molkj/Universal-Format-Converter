@@ -44,6 +44,7 @@ FORMAT_DESC = {
     "pdf": "PDF 文档", "docx": "Word 文档", "doc": "Word 97-2003",
     "xlsx": "Excel 工作簿", "xls": "Excel 97-2003", "csv": "CSV 表格",
     "txt": "纯文本", "md": "Markdown", "html": "网页 HTML",
+    "utf8": "UTF-8 编码", "gbk": "GBK 编码",
     "pptx": "PPT 演示", "ppt": "PPT 97-2003",
     "png": "PNG 图片", "jpg": "JPG 图片", "jpeg": "JPEG 图片",
     "webp": "WebP 图片", "gif": "GIF 图片", "bmp": "BMP 图片",

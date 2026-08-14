@@ -431,6 +431,62 @@ def pptx_to_text(src, out_path, progress):
 # 注册
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# 文本编码转换（GBK ↔ UTF-8，修复乱码）
+# ---------------------------------------------------------------------------
+
+def detect_encoding(src: str) -> str:
+    """检测文本文件编码：优先 BOM，其次尝试 UTF-8/GBK"""
+    with open(src, "rb") as f:
+        raw = f.read(4096)
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return "utf-8-sig"
+    if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
+        return "utf-16"
+    for enc in ("utf-8", "gbk"):
+        try:
+            raw.decode(enc)
+            return enc
+        except UnicodeDecodeError:
+            continue
+    return "gbk"  # 兜底（GBK 几乎能解码任意字节）
+
+
+def convert_text_encoding(src: str, out_path: str, target_enc: str,
+                          progress) -> str:
+    """把文本文件转换为目标编码（utf-8 / utf-8-sig / gbk）"""
+    src_enc = detect_encoding(src)
+    with open(src, "rb") as f:
+        raw = f.read()
+    try:
+        text = raw.decode(src_enc, errors="replace")
+    except Exception as e:  # noqa: BLE001
+        raise ConverterError(f"读取文件编码失败（{src_enc}）：{e}") from e
+    # 统一为纯 UTF-8/GBK 再写（去除 BOM）
+    if src_enc == "utf-8-sig":
+        text = text
+    with open(out_path, "w", encoding=target_enc, newline="") as f:
+        f.write(text)
+    progress.report(100, 100,
+                    f"编码转换完成（{src_enc} → {target_enc}）")
+    return out_path
+
+
+def _encoding_wrapper(target_enc: str, label: str):
+    def wrapper(src, tgt, out_dir, progress, opts):
+        # 输出名带编码标记，避免与普通 txt 冲突（如 报告_UTF8.txt）
+        src_enc = detect_encoding(src)
+        if src_enc == target_enc or (src_enc == "utf-8-sig" and target_enc == "utf-8"):
+            raise ConverterError("文件已是目标编码，无需转换。")
+        marker = "UTF8" if target_enc in ("utf-8", "utf-8-sig") else "GBK"
+        out = unique_path(out_dir, f"{stem(src)}_{marker}", "txt")
+        progress.report(0, 100, f"开始：{label}")
+        result = convert_text_encoding(src, out, target_enc, progress)
+        return [result]
+
+    return wrapper
+
+
 def register(registry):
     """向全局注册表注册本模块支持的 (源格式, 目标格式) -> 转换函数"""
 
@@ -441,8 +497,8 @@ def register(registry):
         "doc": ["pdf", "txt", "docx"],
         "xlsx": ["csv", "txt"],
         "xls": ["xlsx"],
-        "csv": ["xlsx"],
-        "txt": ["docx", "md"],
+        "csv": ["xlsx", "utf8", "gbk"],
+        "txt": ["docx", "md", "utf8", "gbk"],
         "md": ["docx", "html"],
         "html": ["txt", "docx"],
         "pptx": ["pdf", "txt"],
@@ -496,6 +552,13 @@ def register(registry):
     registry.register("文档", "xlsx", "txt", _mk(xlsx_to_txt, "Excel → 文本"))
     registry.register("文档", "xls", "xlsx", _mk(xls_to_xlsx, "XLS → XLSX"))
     registry.register("文档", "csv", "xlsx", _mk(csv_to_xlsx, "CSV → Excel"))
+
+    # 文本编码转换（修复乱码）
+    for _src in ("txt", "csv"):
+        registry.register("文档", _src, "utf8",
+                          _encoding_wrapper("utf-8", "转为 UTF-8"))
+        registry.register("文档", _src, "gbk",
+                          _encoding_wrapper("gbk", "转为 GBK"))
 
     registry.register("文档", "pptx", "pdf", _mk(pptx_to_pdf, "PPT → PDF"))
     registry.register("文档", "pptx", "txt", _mk(pptx_to_text, "PPT → 文本"))
