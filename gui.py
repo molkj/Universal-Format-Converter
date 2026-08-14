@@ -222,7 +222,7 @@ class SettingsDialog(QDialog):
     def __init__(self, max_threads: int, hw_accel: bool, parent=None):
         super().__init__(parent)
         self.setWindowTitle("设置")
-        self.setFixedWidth(340)
+        self.setFixedWidth(380)
         lay = QVBoxLayout(self)
         lay.setSpacing(14)
 
@@ -235,7 +235,7 @@ class SettingsDialog(QDialog):
 
         # GPU 硬件加速
         self.chk_hw = CheckBoxWithLabel("视频转换使用 GPU 硬件加速（无 GPU 自动回退 CPU）",
-                                        checked=hw_accel)
+                                        checked=hw_accel, word_wrap=True)
         self.chk_hw.setCursor(Qt.PointingHandCursor)
         lay.addWidget(self.chk_hw)
 
@@ -372,20 +372,25 @@ class CheckBoxWithLabel(QWidget):
 
     changed = Signal(bool)
 
-    def __init__(self, label_text: str = "", checked: bool = True, parent=None):
+    def __init__(self, label_text: str = "", checked: bool = True, parent=None,
+                 word_wrap: bool = False):
         super().__init__(parent)
         # 紧凑尺寸的勾选框（22x22），checkbox 与文字紧贴
         from PySide6.QtCore import QSize
         self.cb = CheckBoxCell(checked, size=QSize(22, 22))
         self.label = QLabel(label_text)
+        if word_wrap:
+            # 长文本自动换行（如设置面板的 GPU 说明），避免被截断
+            self.label.setWordWrap(True)
         from PySide6.QtWidgets import QHBoxLayout, QSizePolicy
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
         lay.addWidget(self.cb)
-        lay.addWidget(self.label)
+        lay.addWidget(self.label, 1 if word_wrap else 0)
         # 不强制固定高度，让其与 label 文字基线对齐
-        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
+        self.setSizePolicy(QSizePolicy.Expanding if word_wrap else QSizePolicy.Maximum,
+                           QSizePolicy.Preferred)
         self.cb.checkedChanged.connect(self.changed.emit)
 
     def isChecked(self) -> bool:
