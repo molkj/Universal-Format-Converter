@@ -507,8 +507,9 @@ class MainWindow(QMainWindow):
         self._tasks_total: int = 0
         self._tasks_done: int = 0
         self.out_dir = self._load_out_dir()
-        # 用户设置（并发数 / GPU 硬件加速），QSettings 持久化
-        self._max_threads, self._hw_accel = self._load_settings()
+        # 用户设置（并发数 / GPU / 自动打开 / 打包 ZIP），QSettings 持久化
+        (self._max_threads, self._hw_accel,
+         self._auto_open, self._pack_zip) = self._load_settings()
         self.log_lines = 0
         self._current_row = -1
         self._inline_progress: InlineProgress | None = None
@@ -699,13 +700,17 @@ class MainWindow(QMainWindow):
         ctrl.addSpacing(8)
         ctrl.addWidget(self.btn_cancel)
         # 转换完成后自动打开输出目录（自绘 CheckBoxWithLabel，避免 QCheckBox QSS 渲染问题）
-        self.chk_auto_open = CheckBoxWithLabel("完成后自动打开输出目录", checked=False)
+        self.chk_auto_open = CheckBoxWithLabel("完成后自动打开输出目录",
+                                               checked=self._auto_open)
         self.chk_auto_open.setCursor(Qt.PointingHandCursor)
+        self.chk_auto_open.changed.connect(self._save_settings)
         ctrl.addSpacing(16)
         ctrl.addWidget(self.chk_auto_open)
         # 转换完成后把成功输出打包为 ZIP
-        self.chk_pack_zip = CheckBoxWithLabel("完成后打包 ZIP", checked=False)
+        self.chk_pack_zip = CheckBoxWithLabel("完成后打包 ZIP",
+                                              checked=self._pack_zip)
         self.chk_pack_zip.setCursor(Qt.PointingHandCursor)
+        self.chk_pack_zip.changed.connect(self._save_settings)
         ctrl.addSpacing(12)
         ctrl.addWidget(self.chk_pack_zip)
         # 设置面板
@@ -1192,27 +1197,35 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001
             pass
 
-    def _load_settings(self) -> tuple[int, bool]:
-        """读取用户设置：并发数 / GPU 硬件加速"""
+    def _load_settings(self) -> tuple[int, bool, bool, bool]:
+        """读取用户设置：并发数 / GPU 硬件加速 / 自动打开 / 打包 ZIP（均 QSettings 持久化）"""
         try:
             s = QSettings("molkj", "UniversalFormatConverter")
             threads = int(s.value("max_threads", 4))
             hw = str(s.value("hw_accel", "1")) not in ("0", "false", "False")
-            return max(1, min(8, threads)), hw
+            auto_open = str(s.value("auto_open", "0")) not in ("0", "false", "False")
+            pack_zip = str(s.value("pack_zip", "0")) not in ("0", "false", "False")
+            return max(1, min(8, threads)), hw, auto_open, pack_zip
         except Exception:  # noqa: BLE001
-            return 4, True
+            return 4, True, False, False
+
+    def _save_settings(self):
+        """持久化当前设置到 QSettings（设置面板/复选框变更时调用）"""
+        try:
+            s = QSettings("molkj", "UniversalFormatConverter")
+            s.setValue("max_threads", self._max_threads)
+            s.setValue("hw_accel", "1" if self._hw_accel else "0")
+            s.setValue("auto_open", "1" if self.chk_auto_open.isChecked() else "0")
+            s.setValue("pack_zip", "1" if self.chk_pack_zip.isChecked() else "0")
+        except Exception:  # noqa: BLE001
+            pass
 
     def _open_settings(self):
         dlg = SettingsDialog(self._max_threads, self._hw_accel, self)
         if dlg.exec() == QDialog.Accepted:
             threads, hw = dlg.values()
             self._max_threads, self._hw_accel = threads, hw
-            try:
-                s = QSettings("molkj", "UniversalFormatConverter")
-                s.setValue("max_threads", threads)
-                s.setValue("hw_accel", "1" if hw else "0")
-            except Exception:  # noqa: BLE001
-                pass
+            self._save_settings()
             self.log(f"⚙ 设置已更新：并发 {threads}，"
                      f"GPU 硬件加速 {'开' if hw else '关'}")
             # 硬件加速开关变化时清除检测缓存
