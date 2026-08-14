@@ -56,7 +56,7 @@ FORMAT_DESC = {
     "flac": "FLAC 音频", "ogg": "OGG 音频", "m4a": "M4A 音频",
     "wma": "WMA 音频",
     "zip": "ZIP 压缩包", "7z": "7Z 压缩包", "tar": "TAR 压缩包",
-    "gz": "GZ 压缩包", "tgz": "TGZ 压缩包",
+    "gz": "GZ 压缩包", "tgz": "TGZ 压缩包", "rar": "RAR 压缩包",
     "文件夹": "解压为文件夹",
 }
 
@@ -69,7 +69,7 @@ for _ext in ("png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "ico", "svg"):
 for _ext in ("mp4", "mkv", "avi", "mov", "webm", "flv", "wmv", "m4v", "mts",
              "mp3", "wav", "aac", "flac", "ogg", "m4a", "wma"):
     EXT_CATEGORY[_ext] = "音视频"
-for _ext in ("zip", "7z", "tar", "gz", "tgz"):
+for _ext in ("zip", "7z", "tar", "gz", "tgz", "rar"):
     EXT_CATEGORY[_ext] = "压缩包"
 
 

@@ -1,8 +1,9 @@
-"""压缩包处理：ZIP / 7Z / TAR.GZ 的创建、解压与互转"""
+"""压缩包处理：ZIP / 7Z / TAR.GZ / RAR（解压）的创建、解压与互转"""
 from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import tarfile
 import tempfile
 import zipfile
@@ -15,8 +16,89 @@ from .utils import (
     unique_path,
 )
 
-ARCHIVE_EXTS = ("zip", "7z", "gz", "tar", "tgz")
+ARCHIVE_EXTS = ("zip", "7z", "gz", "tar", "tgz", "rar")
 PACK_EXTS = ("zip", "7z", "tar.gz", "tar")
+
+# ---------------------------------------------------------------------------
+# RAR 按需引擎：RAR 是专利格式，无法用纯 Python 解压。
+# 优先检测系统已装的 unrar / 7-Zip / WinRAR，找到哪个用哪个（只解不压）。
+# ---------------------------------------------------------------------------
+_RAR_TOOL: str | None = None  # 缓存检测结果
+
+
+def find_rar_tool() -> str | None:
+    """查找可用的 RAR 解压工具：unrar → 7z → WinRAR（UnRAR.exe）"""
+    global _RAR_TOOL
+    if _RAR_TOOL is not None:
+        return _RAR_TOOL
+    candidates = []
+    # PATH 中的 unrar / 7z
+    for name in ("unrar", "7z", "7za", "rar"):
+        w = shutil.which(name)
+        if w:
+            candidates.append((name, w))
+    # 常见安装目录
+    fixed = [
+        (r"C:\Program Files\WinRAR\UnRAR.exe", "unrar"),
+        (r"C:\Program Files\WinRAR\WinRAR.exe", "winrar"),
+        (r"C:\Program Files\7-Zip\7z.exe", "7z"),
+        (r"C:\Program Files (x86)\7-Zip\7z.exe", "7z"),
+    ]
+    for path, kind in fixed:
+        if os.path.isfile(path):
+            candidates.append((kind, path))
+    for kind, path in candidates:
+        # 实测运行一次确认可用（unrar -y 空参数、7z -y 均会快速退出）
+        try:
+            r = subprocess.run(
+                [path, "-y"] if kind != "7z" else [path, "i"],
+                capture_output=True, timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if r.returncode in (0, 1):  # 0=成功, 1=无参数使用说明（工具存在）
+                _RAR_TOOL = f"{kind}::{path}"
+                return _RAR_TOOL
+        except Exception:  # noqa: BLE001
+            continue
+    _RAR_TOOL = ""
+    return None
+
+
+def extract_rar(src: str, out_dir: str, progress: Progress) -> list[str]:
+    """用外部工具解压 RAR（只解不压）"""
+    tool = find_rar_tool()
+    if not tool:
+        raise ConverterError(
+            "解压 RAR 需要本机安装 WinRAR 或 7-Zip（RAR 是专利格式，"
+            "无法内置解压）。请安装任一后重试。")
+    kind, path = tool.split("::", 1)
+    progress.report(10, 100, "正在用外部工具解压 RAR…")
+    if kind in ("7z", "7za"):
+        cmd = [path, "x", "-y", f"-o{out_dir}", src]
+    else:  # unrar / rar / winrar
+        cmd = [path, "x", "-y", src, f"{out_dir}{os.sep}"]
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert proc.stdout is not None
+    for line in iter(proc.stdout.readline, ""):
+        if progress.cancelled:
+            proc.kill()
+            proc.wait()
+            raise InterruptedError
+    proc.wait()
+    if proc.returncode != 0:
+        raise ConverterError(
+            f"RAR 解压失败（{os.path.basename(path)} 退出码 "
+            f"{proc.returncode}）。文件可能损坏或已加密。")
+    progress.report(100, 100, "RAR 解压完成")
+    return [os.path.join(out_dir, n) for n in os.listdir(out_dir)]
+
 
 # 压缩包 -> 可解压为文件夹（输出目录）
 EXTRACT_TARGETS = {
@@ -25,6 +107,7 @@ EXTRACT_TARGETS = {
     "gz": ["文件夹"],
     "tar": ["文件夹"],
     "tgz": ["文件夹"],
+    "rar": ["文件夹"],
 }
 
 # 压缩包互转
@@ -34,6 +117,7 @@ CONVERT_TARGETS = {
     "tar": ["zip", "7z", "tar.gz"],
     "tgz": ["zip", "7z"],
     "gz": ["zip", "7z"],
+    "rar": ["zip", "7z"],
 }
 
 
@@ -42,7 +126,9 @@ def extract_archive(src: str, out_dir: str, progress: Progress) -> list[str]:
     ext = src.rsplit(".", 1)[-1].lower()
     progress.report(5, 100, "正在解压…")
 
-    if ext == "zip":
+    if ext == "rar":
+        return extract_rar(src, out_dir, progress)
+    elif ext == "zip":
         with zipfile.ZipFile(src) as zf:
             _safe_extract_zip(zf, out_dir, progress)
     elif ext == "7z":
