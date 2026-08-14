@@ -58,6 +58,23 @@ def extract_archive(src: str, out_dir: str, progress: Progress) -> list[str]:
                 progress.report(5 + int(i / max(1, len(names)) * 90), 100,
                                 f"解压 {name}…")
             z.extractall(path=out_dir)
+    elif ext == "gz":
+        # 纯 gzip 单文件（非 tar.gz）：解压出原始文件
+        import gzip
+        import shutil
+        out_name = os.path.basename(src.rsplit(".", 1)[0]) or "解压文件"
+        dest = os.path.join(out_dir, out_name)
+        i = 1
+        while os.path.exists(dest):
+            dest = os.path.join(out_dir, f"{out_name} ({i})")
+            i += 1
+        progress.report(50, 100, f"解压 {os.path.basename(src)}…")
+        if progress.cancelled:
+            raise InterruptedError
+        with gzip.open(src, "rb") as f_in, open(dest, "wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
+        progress.report(100, 100, "解压完成")
+        return [dest]
     else:
         # tar / tar.gz / tgz
         with tarfile.open(src) as tf:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from .utils import ConverterError, Progress, stem, unique_path
+from .utils import ConverterError, Progress, get_ext, stem, unique_path
 
 # 支持的源格式 -> 可选目标格式
 IMAGE_TARGETS = {

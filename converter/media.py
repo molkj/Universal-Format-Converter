@@ -17,14 +17,14 @@ from .utils import (
 
 # 视频源格式 -> 目标格式
 VIDEO_TARGETS = {
-    "mp4": ["mkv", "avi", "mov", "webm", "flv", "wmv", "gif", "mp3", "wav", "m4a", "jpg"],
-    "mkv": ["mp4", "avi", "mov", "webm", "flv", "wmv", "gif", "mp3", "wav", "m4a", "jpg"],
-    "avi": ["mp4", "mkv", "mov", "webm", "flv", "wmv", "gif", "mp3", "wav", "m4a", "jpg"],
-    "mov": ["mp4", "mkv", "avi", "webm", "flv", "wmv", "gif", "mp3", "wav", "m4a", "jpg"],
-    "webm": ["mp4", "mkv", "avi", "mov", "flv", "wmv", "gif", "mp3", "wav", "m4a", "jpg"],
-    "flv": ["mp4", "mkv", "avi", "mov", "webm", "wmv", "gif", "mp3", "wav", "m4a", "jpg"],
-    "wmv": ["mp4", "mkv", "avi", "mov", "webm", "gif", "mp3", "wav", "m4a", "jpg"],
-    "m4v": ["mp4", "mkv", "avi", "mov", "webm", "wmv", "gif", "mp3", "wav", "m4a", "jpg"],
+    "mp4": ["mkv", "avi", "mov", "webm", "flv", "wmv", "gif", "mp3", "wav", "m4a", "flac", "ogg", "jpg"],
+    "mkv": ["mp4", "avi", "mov", "webm", "flv", "wmv", "gif", "mp3", "wav", "m4a", "flac", "ogg", "jpg"],
+    "avi": ["mp4", "mkv", "mov", "webm", "flv", "wmv", "gif", "mp3", "wav", "m4a", "flac", "ogg", "jpg"],
+    "mov": ["mp4", "mkv", "avi", "webm", "flv", "wmv", "gif", "mp3", "wav", "m4a", "flac", "ogg", "jpg"],
+    "webm": ["mp4", "mkv", "avi", "mov", "flv", "wmv", "gif", "mp3", "wav", "m4a", "flac", "ogg", "jpg"],
+    "flv": ["mp4", "mkv", "avi", "mov", "webm", "wmv", "gif", "mp3", "wav", "m4a", "flac", "ogg", "jpg"],
+    "wmv": ["mp4", "mkv", "avi", "mov", "webm", "gif", "mp3", "wav", "m4a", "flac", "ogg", "jpg"],
+    "m4v": ["mp4", "mkv", "avi", "mov", "webm", "wmv", "gif", "mp3", "wav", "m4a", "flac", "ogg", "jpg"],
     "mts": ["mp4", "mkv", "avi", "mov", "webm", "wmv"],
 }
 

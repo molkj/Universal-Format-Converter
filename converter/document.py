@@ -238,6 +238,31 @@ def markdown_to_docx(src, out_path, progress):
     return out_path
 
 
+def txt_to_md(src, out_path, progress):
+    """纯文本 → Markdown：逐行转为简单 Markdown 结构"""
+    with open(src, "r", encoding="utf-8", errors="replace") as f:
+        lines = f.read().splitlines()
+    parts = []
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith("### "):
+            parts.append(f"### {s[4:]}")
+        elif s.startswith("## "):
+            parts.append(f"## {s[3:]}")
+        elif s.startswith("# "):
+            parts.append(f"# {s[2:]}")
+        elif s.startswith(("- ", "* ", "+ ")):
+            parts.append(f"- {s[2:]}")
+        else:
+            parts.append(s)
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("\n\n".join(parts))
+    progress.report(100, 100, "文本 → Markdown 完成")
+    return out_path
+
+
 def html_to_text(src, out_path, progress):
     text = _html_to_text(src)
     with open(out_path, "w", encoding="utf-8") as f:
@@ -340,7 +365,12 @@ def xls_to_xlsx(src, out_path, progress):
 
     wb_old = xlrd.open_workbook(src)
     wb = Workbook()
-    for sheet in wb_old.sheets():
+    # 兼容 xlrd 1.x（.sheets()）与 xlrd 2.x（.sheet_names() / .sheet_by_name()）
+    if hasattr(wb_old, "sheets"):
+        sheets = wb_old.sheets()
+    else:
+        sheets = [wb_old.sheet_by_name(n) for n in wb_old.sheet_names()]
+    for sheet in sheets:
         ws = wb.create_sheet(title=sheet.name[:31])
         for r in range(sheet.nrows):
             ws.append(sheet.row_values(r))
@@ -456,7 +486,7 @@ def register(registry):
                       _mk(lambda s, o, p: _office_com_convert(s, o, ("Word.Application", "KWps.Application"), 16), "DOC → DOCX"))
 
     registry.register("文档", "txt", "docx", _mk(text_to_docx, "文本 → Word"))
-    registry.register("文档", "txt", "md", _mk(docx_to_text, "文本 → Markdown"))
+    registry.register("文档", "txt", "md", _mk(txt_to_md, "文本 → Markdown"))
     registry.register("文档", "md", "docx", _mk(markdown_to_docx, "Markdown → Word"))
     registry.register("文档", "md", "html", _mk(md_to_html, "Markdown → HTML"))
     registry.register("文档", "html", "txt", _mk(html_to_text, "HTML → 文本"))

@@ -1402,9 +1402,10 @@ class MainWindow(QMainWindow):
         self.progress_label.setText(message)
 
     def _on_pool_done_local(self):
-        """所有任务完成：汇总 + 恢复 UI"""
-        ok = sum(1 for t in self.tasks if t.status == "成功")
-        fail = self._tasks_done - ok
+        """所有任务完成：汇总 + 恢复 UI（只统计本次转换的任务）"""
+        run_tasks = getattr(self, "_run_tasks", [])
+        ok = sum(1 for t in run_tasks if t.status == "成功")
+        fail = len(run_tasks) - ok
         self._on_pool_done(ok, fail)
 
     def _on_pool_done(self, ok: int, fail: int):
