@@ -920,6 +920,12 @@ class MainWindow(QMainWindow):
             return
         self.tasks.clear()
         self._refresh_table()
+        # 重置底部进度条 / 文字 / 状态栏（清空后回到初始就绪状态）
+        self.progress.setValue(0)
+        self.progress.setStyleSheet("")  # 恢复默认蓝色
+        self.progress_label.setText("就绪，等待添加文件")
+        self.statusBar().showMessage(
+            "把文件或文件夹拖入窗口，勾选要转换的项目，点击「开始转换」")
         self.log("已清空任务列表")
 
     def _merge_images_to_pdf(self):
