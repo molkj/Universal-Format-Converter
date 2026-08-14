@@ -24,13 +24,14 @@ a = Analysis(
         "pythoncom",
         "PIL._tkinter_finder",
         "openpyxl", "openpyxl.cell._writer",
-        "pdf2docx",
     ],
     hookspath=[os.path.join(ROOT, "hooks")],
     hooksconfig={},
     runtime_hooks=[],
     # 排除用不到的 Qt 模块与标准库，进一步瘦身
     excludes=[
+        # 体积大头：cv2/numpy 已被 PDF→DOCX 轻量实现移除（原 pdf2docx 依赖，约 100MB）
+        "cv2", "numpy", "scipy", "pdf2docx", "opencv",
         "PySide6.QtNetwork", "PySide6.QtNetworkAuth",
         "PySide6.QtOpenGL", "PySide6.QtOpenGLWidgets",
         "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtQuickWidgets",
@@ -56,7 +57,6 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 # 体积优化：排除用不到的二进制（不影响任何已支持的功能）
 # ---------------------------------------------------------------------------
 _EXCLUDE_BIN_MARKERS = [
-    "cv2/opencv_videoio_ffmpeg",  # opencv 视频读写 DLL（pdf2docx 仅用图像处理）
     "opengl32sw",                 # Qt 软件 OpenGL 渲染器（界面用 raster 渲染）
     "Qt6Quick", "Qt6Qml", "Qt6Pdf",  # 用不到的 QML/PDF 模块
     "_avif",                      # Pillow 的 AVIF 编码支持（未列入转换格式）
