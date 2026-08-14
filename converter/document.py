@@ -138,50 +138,14 @@ def _office_com_convert(src: str, out_path: str, app_ids, save_format, load_form
 # ---------------------------------------------------------------------------
 
 def pdf_to_docx(src, out_path, progress):
-    """PDF → Word（轻量版）：pymupdf 提取文本 + 按字号识别标题，python-docx 重建
-
-    相比 pdf2docx 少了表格/图片的高保真排版，但文字内容完整、
-    可编辑复制；换来了去掉 cv2/numpy 约 100MB 的体积。"""
-    import fitz
-    from docx import Document
+    from pdf2docx import Converter
 
     progress.report(10, 100, "正在解析 PDF…")
-    doc_pdf = fitz.open(src)
-    docx = Document()
+    cv = Converter(src)
     try:
-        total = max(1, doc_pdf.page_count)
-        for pi, page in enumerate(doc_pdf):
-            if progress.cancelled:
-                raise InterruptedError
-            progress.report(10 + int(pi / total * 88), 100,
-                            f"解析第 {pi + 1}/{total} 页…")
-            # 按行提取（dict 模式可拿到字号/加粗信息用于识别标题）
-            d = page.get_text("dict")
-            for block in d.get("blocks", []):
-                if block.get("type") != 0:  # 0=文本块，跳过图片
-                    continue
-                for line in block.get("lines", []):
-                    spans = line.get("spans", [])
-                    if not spans:
-                        continue
-                    text = "".join(s.get("text", "") for s in spans).strip()
-                    if not text:
-                        continue
-                    # 用最大字号 + 加粗判断标题层级
-                    size = max(s.get("size", 0) for s in spans)
-                    bold = any(s.get("flags", 0) & 16 for s in spans)  # 2^4=加粗
-                    if size >= 20:
-                        docx.add_heading(text, level=1)
-                    elif size >= 15:
-                        docx.add_heading(text, level=2)
-                    elif size >= 12.5 and bold:
-                        docx.add_heading(text, level=3)
-                    else:
-                        docx.add_paragraph(text)
-        progress.report(98, 100, "正在保存 Word…")
-        docx.save(out_path)
+        cv.convert(out_path)
     finally:
-        doc_pdf.close()
+        cv.close()
     progress.report(100, 100, "PDF → Word 完成")
     return out_path
 
