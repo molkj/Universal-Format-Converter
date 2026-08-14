@@ -497,6 +497,41 @@ class _TaskRunner(QRunnable):
 
 
 # ---------------------------------------------------------------------------
+# 可排序表格：支持拖拽行调整顺序（内部拖拽），外部文件拖入时冒泡给主窗口
+# ---------------------------------------------------------------------------
+
+class SortableTable(QTableWidget):
+    """行内拖拽排序 + 外部文件拖入转发给主窗口"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.InternalMove)
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.source() is self:
+            event.acceptProposedAction()  # 内部行拖拽：允许排序
+        elif event.mimeData().hasUrls():
+            event.ignore()  # 外部文件：转发给主窗口处理
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.source() is self:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent):
+        if event.source() is self:
+            super().dropEvent(event)
+        else:
+            event.ignore()  # 外部文件拖入 → 冒泡给窗口的 dropEvent
+
+
+# ---------------------------------------------------------------------------
 # 主窗口
 # ---------------------------------------------------------------------------
 
@@ -606,7 +641,7 @@ class MainWindow(QMainWindow):
         root.addLayout(toolbar)
 
         # ---- 文件表格 ----
-        self.table = QTableWidget(0, 6)
+        self.table = SortableTable(0, 6)
         self.table.setHorizontalHeaderLabels(["", "文件", "大小", "类型", "转换为", "状态"])
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(36)
@@ -649,6 +684,8 @@ class MainWindow(QMainWindow):
         self.table.cellDoubleClicked.connect(self._open_row_location)
         # 选中行时在底部状态栏显示完整信息
         self.table.itemSelectionChanged.connect(self._update_status_bar)
+        # 行内拖拽排序后：同步 tasks 顺序（顺序决定合并 PDF 页码等）
+        self.table.model().rowsMoved.connect(self._on_rows_moved)
         self.statusBar().setStyleSheet(
             f"QStatusBar{{background:{C_CARD}; border-top:1px solid {C_BORDER};"
             f"color:{C_TEXT_SUB}; font-size:12px; padding:2px 8px;}}")
@@ -1060,6 +1097,22 @@ class MainWindow(QMainWindow):
         self._update_summary()
         self._sync_header_check()
 
+    def _on_rows_moved(self, *args):
+        """行拖拽排序后：按表格当前顺序重建 tasks（保证合并 PDF 页码、转换顺序正确）"""
+        # rowsMoved 信号在 item 移动后触发，但 cellWidget 不随行移动，
+        # 因此按表格当前 item 顺序重建 tasks 后刷新整表
+        if not self.tasks or self.table.rowCount() != len(self.tasks):
+            return
+        # 从表格行读取 src 顺序（InternalMove 已把 item 移到新位置）
+        row_srcs = []
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, self.COL_NAME)
+            row_srcs.append(item.data(Qt.UserRole) if item else None)
+        by_src = {t.src: t for t in self.tasks}
+        self.tasks = [by_src[s] for s in row_srcs if s in by_src]
+        self._refresh_table()  # 重建 cellWidget，避免行内容错位
+        self.log("↕ 已调整任务顺序")
+
     def _fill_row(self, row: int, task: TaskItem):
         # 勾选框：用自绘 CheckBoxCell（避免 QSS image 渲染问题，与表头同源）
         cb = CheckBoxCell(task.checked)
@@ -1071,6 +1124,7 @@ class MainWindow(QMainWindow):
         name = os.path.basename(task.src)
         name_item = QTableWidgetItem(name)
         name_item.setToolTip(task.src)
+        name_item.setData(Qt.UserRole, task.src)  # 拖拽排序时按此重建 tasks 顺序
         if is_dir:
             name_item.setText("📁 " + name)
         self.table.setItem(row, self.COL_NAME, name_item)
