@@ -26,6 +26,8 @@ VIDEO_TARGETS = {
     "wmv": ["mp4", "mkv", "avi", "mov", "webm", "gif", "mp3", "wav", "m4a", "flac", "ogg", "jpg"],
     "m4v": ["mp4", "mkv", "avi", "mov", "webm", "wmv", "gif", "mp3", "wav", "m4a", "flac", "ogg", "jpg"],
     "mts": ["mp4", "mkv", "avi", "mov", "webm", "wmv"],
+    # GIF 动图 → 视频（无音轨，用 -an）
+    "gif": ["mp4", "mkv", "avi", "mov", "webm"],
 }
 
 # 音频源格式 -> 目标格式
@@ -146,19 +148,50 @@ def _run_ffmpeg(cmd: list[str], src: str, progress: Progress, label: str):
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert proc.stdout is not None
+    err_lines: list[str] = []
     for line in iter(proc.stdout.readline, ""):
         if progress.cancelled:
             proc.kill()
             proc.wait()  # 等进程退出、释放文件句柄，避免残留半成品删不掉
             raise InterruptedError
+        line_s = line.strip()
+        if line_s:
+            err_lines.append(line_s)
+            if len(err_lines) > 40:
+                err_lines.pop(0)
         t = parse_ffmpeg_time(line)
         if t is not None and duration:
             pct = min(99, int(t / duration * 100))
             progress.report(pct, 100, f"{label}（{pct}%）")
     proc.wait()
     if proc.returncode != 0:
-        raise ConverterError(f"ffmpeg 转换失败，退出码 {proc.returncode}。请检查源文件是否损坏。")
+        raise ConverterError(_ffmpeg_error_message(proc.returncode, err_lines))
     progress.report(100, 100, f"{label} 完成")
+
+
+_FFMPEG_ERROR_PATTERNS = [
+    # (正则, 中文提示)
+    (r"No such file or directory", "找不到源文件或输出路径（路径可能被移动/删除，或含非法字符）。"),
+    (r"Invalid data found when processing input", "源文件损坏或不是有效的媒体文件。"),
+    (r"could not find codec|Unknown encoder|Unknown decoder", "缺少对应的编解码器（此 ffmpeg 精简版未包含）。"),
+    (r"Permission denied", "没有写入权限，输出目录可能被占用或受保护。"),
+    (r"is not a valid DTS|moov atom not found", "源视频文件不完整（可能未下载完成或被截断）。"),
+    (r"Error while opening encoder|failed to open encoder", "编码器初始化失败，可能是输出格式与编码器不匹配。"),
+    (r"Conversion failed!", "转换失败，源文件可能损坏或格式异常。"),
+    (r"Encoder \(codec [^)]*\) is experimental", "该编码器仍处于实验阶段，无法使用。"),
+    (r"Non-monotonous DTS|stream .* does not contain any stream", "源文件音视频流异常，可能已被损坏。"),
+]
+
+
+def _ffmpeg_error_message(returncode: int, err_lines: list[str]) -> str:
+    """把 ffmpeg 退出码 + 输出行转成用户可读的中文错误提示"""
+    joined = "\n".join(err_lines)
+    for pat, hint in _FFMPEG_ERROR_PATTERNS:
+        import re
+        if re.search(pat, joined, re.IGNORECASE):
+            return f"ffmpeg 转换失败：{hint}"
+    return (f"ffmpeg 转换失败（退出码 {returncode}）。"
+            "请检查源文件是否损坏，或目标格式是否被此版本 ffmpeg 支持。")
 
 
 def convert_media(src: str, target_ext: str, out_path: str, progress: Progress,
@@ -201,6 +234,7 @@ def convert_media(src: str, target_ext: str, out_path: str, progress: Progress,
             pass
         # 视频容器互转（libx264 目标支持 GPU 硬件加速，失败自动回退 CPU）
         vcodec, acodec, _ = _VIDEO_CONTAINERS.get(target_ext, ("libx264", "aac", "mp4"))
+        is_gif_src = src_ext == "gif"  # GIF 无音轨
         use_hw = False
         if vcodec == "libx264" and opts.get("hw_accel", True):
             hw = detect_hw_h264()
@@ -208,7 +242,12 @@ def convert_media(src: str, target_ext: str, out_path: str, progress: Progress,
                 use_hw = True
                 vcodec = hw[0]
         cmd = [ffmpeg, "-y", "-i", src, "-c:v", vcodec]
-        if acodec:
+        if is_gif_src:
+            cmd += ["-an"]  # GIF 没有音轨，禁止尝试编码音频
+            if vcodec == "libvpx":
+                # VP8 透明通道与 auto-alt-ref 冲突：禁用 + 指定码率
+                cmd += ["-auto-alt-ref", "0", "-b:v", "2M"]
+        elif acodec:
             cmd += ["-c:a", acodec]
         if use_hw:
             # 硬件编码器参数（码率控制；nvenc/amf/qsv 通用）
@@ -226,7 +265,9 @@ def convert_media(src: str, target_ext: str, out_path: str, progress: Progress,
                 raise
             # 硬件编码失败（驱动/会话问题）→ 回退 CPU libx264
             cmd = [ffmpeg, "-y", "-i", src, "-c:v", "libx264"]
-            if acodec:
+            if is_gif_src:
+                cmd += ["-an"]
+            elif acodec:
                 cmd += ["-c:a", acodec]
             cmd += ["-movflags", "+faststart", "-preset", "medium",
                     "-crf", "21", out_path]
