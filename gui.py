@@ -50,42 +50,6 @@ C_DOING_BG = "#e8f0fe"
 C_WAIT_BG = "#eef1f6"
 C_CANCEL = "#d97706"
 C_CANCEL_BG = "#fef7e6"
-C_HEADER_BORDER = "#e5e7eb"  # 表头底部分隔线（CheckableHeader 自绘用）
-C_CHECK_BG = "#ffffff"       # 勾选框底色（深色模式变深灰）
-C_CHECK_BORDER = "#c3cad6"   # 勾选框未选中边框（深色模式变浅灰）
-
-_DARK_THEME = {
-    "C_PRIMARY": "#6d8dff", "C_PRIMARY_HOVER": "#5b7cf5",
-    "C_BG": "#111827", "C_CARD": "#1f2937", "C_BORDER": "#374151",
-    "C_TEXT": "#f3f4f6", "C_TEXT_SUB": "#9ca3af",
-    "C_OK": "#4ade80", "C_OK_BG": "#14301f",
-    "C_FAIL": "#f87171", "C_FAIL_BG": "#3b1515",
-    "C_DOING_BG": "#1e2a4a", "C_WAIT_BG": "#273041",
-    "C_CANCEL": "#fbbf24", "C_CANCEL_BG": "#3a2e12",
-    "C_HEADER_BORDER": "#374151", "C_CHECK_BG": "#1f2937",
-    "C_CHECK_BORDER": "#6b7280",
-}
-
-
-def set_dark_theme(dark: bool):
-    """切换深浅主题：修改模块级配色常量（QSS 构建时读取）"""
-    global C_PRIMARY, C_PRIMARY_HOVER, C_BG, C_CARD, C_BORDER, C_TEXT
-    global C_TEXT_SUB, C_OK, C_OK_BG, C_FAIL, C_FAIL_BG, C_DOING_BG
-    global C_WAIT_BG, C_CANCEL, C_CANCEL_BG, C_HEADER_BORDER
-    global C_CHECK_BG, C_CHECK_BORDER
-    if not dark:
-        C_PRIMARY, C_PRIMARY_HOVER = "#4f6df5", "#3d5bd9"
-        C_BG, C_CARD, C_BORDER = "#f7f8fa", "#ffffff", "#e5e7eb"
-        C_TEXT, C_TEXT_SUB = "#1f2937", "#6b7280"
-        C_OK, C_OK_BG = "#16a34a", "#e7f6ec"
-        C_FAIL, C_FAIL_BG = "#dc2626", "#fdecec"
-        C_DOING_BG, C_WAIT_BG = "#e8f0fe", "#eef1f6"
-        C_CANCEL, C_CANCEL_BG = "#d97706", "#fef7e6"
-        C_HEADER_BORDER = "#e5e7eb"
-        C_CHECK_BG, C_CHECK_BORDER = "#ffffff", "#c3cad6"
-        return
-    for _k, _v in _DARK_THEME.items():
-        globals()[_k] = _v
 
 # 文件类型 -> 图标与颜色
 TYPE_STYLE = {
@@ -121,21 +85,18 @@ def human_size(num: float) -> str:
 # ---------------------------------------------------------------------------
 
 class StatusBadge(QLabel):
-    """圆角彩色状态徽章（颜色动态取当前主题常量）"""
-
-    @staticmethod
-    def _kind(text: str) -> tuple[str, str]:
-        return {
-            "等待中": (C_WAIT_BG, C_TEXT_SUB),
-            "转换中": (C_DOING_BG, C_PRIMARY),
-            "成功": (C_OK_BG, C_OK),
-            "失败": (C_FAIL_BG, C_FAIL),
-            "已取消": (C_CANCEL_BG, C_CANCEL),
-        }.get(text, (C_WAIT_BG, C_TEXT_SUB))
+    """圆角彩色状态徽章"""
+    KIND = {
+        "等待中": (C_WAIT_BG, C_TEXT_SUB),
+        "转换中": (C_DOING_BG, C_PRIMARY),
+        "成功": (C_OK_BG, C_OK),
+        "失败": (C_FAIL_BG, C_FAIL),
+        "已取消": (C_CANCEL_BG, C_CANCEL),
+    }
 
     def __init__(self, text: str):
         super().__init__(text)
-        bg, fg = self._kind(text)
+        bg, fg = self.KIND.get(text, (C_WAIT_BG, C_TEXT_SUB))
         self.setAlignment(Qt.AlignCenter)
         self.setFixedHeight(22)
         self.setStyleSheet(
@@ -215,9 +176,9 @@ class HeaderButton(QPushButton):
                 f"QPushButton:disabled{{background:#c3ccf0;}}")
         else:
             self.setStyleSheet(
-                f"QPushButton{{background:{C_CARD}; color:{C_TEXT};"
+                f"QPushButton{{background:white; color:{C_TEXT};"
                 f"border:1px solid {C_BORDER}; border-radius:6px; padding:0 14px;}}"
-                f"QPushButton:hover{{background:{C_WAIT_BG}; border-color:#c9cfd9;}}"
+                f"QPushButton:hover{{background:#f1f3f7; border-color:#c9cfd9;}}"
                 f"QPushButton:disabled{{color:#9ca3af;}}")
 
 
@@ -256,13 +217,12 @@ class BatchTargetDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
-    """轻量设置面板：并发数 / GPU 硬件加速 / 深色模式"""
+    """轻量设置面板：并发数 / GPU 硬件加速"""
 
-    def __init__(self, max_threads: int, hw_accel: bool, dark_mode: bool,
-                 parent=None):
+    def __init__(self, max_threads: int, hw_accel: bool, parent=None):
         super().__init__(parent)
         self.setWindowTitle("设置")
-        self.setFixedWidth(360)
+        self.setFixedWidth(340)
         lay = QVBoxLayout(self)
         lay.setSpacing(14)
 
@@ -279,21 +239,14 @@ class SettingsDialog(QDialog):
         self.chk_hw.setCursor(Qt.PointingHandCursor)
         lay.addWidget(self.chk_hw)
 
-        # 深色模式
-        self.chk_dark = CheckBoxWithLabel("深色模式", checked=dark_mode)
-        self.chk_dark.setCursor(Qt.PointingHandCursor)
-        lay.addWidget(self.chk_dark)
-
         lay.addStretch(1)
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         lay.addWidget(btns)
 
-    def values(self) -> tuple[int, bool, bool]:
-        return (self.spin_threads.value(),
-                self.chk_hw.isChecked(),
-                self.chk_dark.isChecked())
+    def values(self) -> tuple[int, bool]:
+        return self.spin_threads.value(), self.chk_hw.isChecked()
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +273,7 @@ class CheckableHeader(QHeaderView):
         if logicalIndex == 0:
             _paint_check(painter, rect, self._checked)
             # 底部分隔线
-            painter.setPen(QPen(QColor(C_HEADER_BORDER), 2))
+            painter.setPen(QPen(QColor(229, 231, 235), 2))
             painter.drawLine(rect.x(), rect.bottom(), rect.right(), rect.bottom())
         else:
             super().paintSection(painter, rect, logicalIndex)
@@ -386,12 +339,12 @@ class CheckBoxCell(QWidget):
         cb_rect = QRect(x, y, size, size)
         radius = 4
 
-        # 白底（深色主题用卡片深灰）
+        # 白底
         p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(QColor(C_CHECK_BG)))
+        p.setBrush(QBrush(QColor(255, 255, 255)))
         p.drawRoundedRect(cb_rect, radius, radius)
         # 边框
-        border_color = QColor(C_PRIMARY) if self._checked else QColor(C_CHECK_BORDER)
+        border_color = QColor(79, 109, 245) if self._checked else QColor(195, 202, 214)
         p.setBrush(Qt.NoBrush)
         # 高 DPR 下用稍粗的线
         pen_w = 2.0 if dpr <= 1.0 else 2.5
@@ -399,7 +352,7 @@ class CheckBoxCell(QWidget):
         p.drawRoundedRect(cb_rect, radius, radius)
         # 蓝勾
         if self._checked:
-            pen = QPen(QColor(C_PRIMARY), pen_w + 0.5)
+            pen = QPen(QColor(79, 109, 245), pen_w + 0.5)
             pen.setCapStyle(Qt.RoundCap)
             pen.setJoinStyle(Qt.RoundJoin)
             p.setPen(pen)
@@ -454,18 +407,18 @@ def _paint_check(painter, rect, checked: bool):
     radius = 4
 
     painter.save()
-    # 白底（深色主题用卡片深灰）
+    # 白底
     painter.setPen(Qt.NoPen)
-    painter.setBrush(QBrush(QColor(C_CHECK_BG)))
+    painter.setBrush(QBrush(QColor(255, 255, 255)))
     painter.drawRoundedRect(cb_rect, radius, radius)
     # 边框
-    border_color = QColor(C_PRIMARY) if checked else QColor(C_CHECK_BORDER)
+    border_color = QColor(79, 109, 245) if checked else QColor(195, 202, 214)
     painter.setBrush(Qt.NoBrush)
     painter.setPen(QPen(border_color, 2))
     painter.drawRoundedRect(cb_rect, radius, radius)
     # 蓝勾
     if checked:
-        pen = QPen(QColor(C_PRIMARY), 2)
+        pen = QPen(QColor(79, 109, 245), 2)
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(pen)
@@ -554,8 +507,8 @@ class MainWindow(QMainWindow):
         self._tasks_total: int = 0
         self._tasks_done: int = 0
         self.out_dir = self._load_out_dir()
-        # 用户设置（并发数 / GPU 硬件加速 / 深色模式），QSettings 持久化
-        self._max_threads, self._hw_accel, self._dark_mode = self._load_settings()
+        # 用户设置（并发数 / GPU 硬件加速），QSettings 持久化
+        self._max_threads, self._hw_accel = self._load_settings()
         self.log_lines = 0
         self._current_row = -1
         self._inline_progress: InlineProgress | None = None
@@ -737,28 +690,14 @@ class MainWindow(QMainWindow):
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.setCursor(Qt.PointingHandCursor)
         self.btn_cancel.setStyleSheet(
-            f"QPushButton{{background:{C_CARD}; color:{C_TEXT};"
+            f"QPushButton{{background:white; color:{C_TEXT};"
             f"border:1px solid {C_BORDER}; border-radius:8px; padding:0 22px;}}"
-            f"QPushButton:hover{{background:{C_WAIT_BG};}}"
+            f"QPushButton:hover{{background:#f1f3f7;}}"
             f"QPushButton:disabled{{color:#9ca3af;}}")
         self.btn_cancel.clicked.connect(self._cancel)
         ctrl.addWidget(self.btn_start)
         ctrl.addSpacing(8)
         ctrl.addWidget(self.btn_cancel)
-        # 失败一键重试（仅在有失败任务时可点）
-        self.btn_retry = QPushButton("🔄 重试失败")
-        self.btn_retry.setMinimumHeight(42)
-        self.btn_retry.setEnabled(False)
-        self.btn_retry.setCursor(Qt.PointingHandCursor)
-        self.btn_retry.setStyleSheet(
-            f"QPushButton{{background:{C_CARD}; color:{C_FAIL};"
-            f"border:1px solid {C_FAIL}; border-radius:8px; padding:0 18px;"
-            f"font-weight:bold;}}"
-            f"QPushButton:hover{{background:{C_FAIL_BG};}}"
-            f"QPushButton:disabled{{color:#9ca3af; border-color:{C_BORDER};}}")
-        self.btn_retry.clicked.connect(self._retry_failed)
-        ctrl.addSpacing(8)
-        ctrl.addWidget(self.btn_retry)
         # 转换完成后自动打开输出目录（自绘 CheckBoxWithLabel，避免 QCheckBox QSS 渲染问题）
         self.chk_auto_open = CheckBoxWithLabel("完成后自动打开输出目录", checked=False)
         self.chk_auto_open.setCursor(Qt.PointingHandCursor)
@@ -772,7 +711,7 @@ class MainWindow(QMainWindow):
         # 设置面板
         self.btn_settings = QPushButton("⚙ 设置")
         self.btn_settings.setStyleSheet(
-            f"QPushButton{{background:{C_CARD}; color:{C_TEXT_SUB};"
+            f"QPushButton{{background:white; color:{C_TEXT_SUB};"
             f"border:1px solid {C_BORDER}; border-radius:6px; padding:6px 12px;}}"
             f"QPushButton:hover{{border-color:{C_PRIMARY}; color:{C_PRIMARY};}}")
         self.btn_settings.clicked.connect(self._open_settings)
@@ -782,7 +721,7 @@ class MainWindow(QMainWindow):
         self.btn_log_toggle = QPushButton("📋 显示日志")
         self.btn_log_toggle.setCheckable(True)
         self.btn_log_toggle.setStyleSheet(
-            f"QPushButton{{background:{C_CARD}; color:{C_TEXT_SUB}; border:1px solid {C_BORDER};"
+            f"QPushButton{{background:white; color:{C_TEXT_SUB}; border:1px solid {C_BORDER};"
             f"border-radius:6px; padding:6px 14px;}}"
             f"QPushButton:checked{{background:{C_DOING_BG}; color:{C_PRIMARY};}}")
         self.btn_log_toggle.toggled.connect(self._toggle_log)
@@ -801,8 +740,6 @@ class MainWindow(QMainWindow):
         root.addWidget(self.log_view)
 
     def _apply_style(self):
-        # 按用户设置应用主题（深浅色）
-        set_dark_theme(self._dark_mode)
         self.setStyleSheet(self._build_qss())
 
     def _build_qss(self) -> str:
@@ -1199,24 +1136,6 @@ class MainWindow(QMainWindow):
         if fail:
             parts.append(f"失败 {fail}")
         self.lbl_summary.setText(" · ".join(parts))
-        # 失败任务 > 0 时启用重试按钮
-        self.btn_retry.setEnabled(fail > 0 and not self._is_busy())
-        if fail:
-            self.btn_retry.setText(f"🔄 重试失败（{fail}）")
-
-    def _retry_failed(self):
-        """一键重新勾选所有失败任务并开始转换"""
-        if self._is_busy():
-            return
-        failed = [t for t in self.tasks if t.status == "失败"]
-        if not failed:
-            return
-        for t in failed:
-            t.checked = True
-        self._refresh_table()
-        self._sync_header_check()
-        self.log(f"🔄 重试 {len(failed)} 个失败任务")
-        self._start()
 
     def _open_row_location(self, row: int, col: int):
         if not (0 <= row < len(self.tasks)):
@@ -1267,38 +1186,29 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001
             pass
 
-    def _load_settings(self) -> tuple[int, bool, bool]:
-        """读取用户设置：并发数 / GPU 硬件加速 / 深色模式"""
+    def _load_settings(self) -> tuple[int, bool]:
+        """读取用户设置：并发数 / GPU 硬件加速"""
         try:
             s = QSettings("molkj", "UniversalFormatConverter")
             threads = int(s.value("max_threads", 4))
             hw = str(s.value("hw_accel", "1")) not in ("0", "false", "False")
-            dark = str(s.value("dark_mode", "0")) not in ("0", "false", "False")
-            return max(1, min(8, threads)), hw, dark
+            return max(1, min(8, threads)), hw
         except Exception:  # noqa: BLE001
-            return 4, True, False
+            return 4, True
 
     def _open_settings(self):
-        dlg = SettingsDialog(self._max_threads, self._hw_accel,
-                             self._dark_mode, self)
+        dlg = SettingsDialog(self._max_threads, self._hw_accel, self)
         if dlg.exec() == QDialog.Accepted:
-            threads, hw, dark = dlg.values()
-            self._max_threads, self._hw_accel, self._dark_mode = threads, hw, dark
+            threads, hw = dlg.values()
+            self._max_threads, self._hw_accel = threads, hw
             try:
                 s = QSettings("molkj", "UniversalFormatConverter")
                 s.setValue("max_threads", threads)
                 s.setValue("hw_accel", "1" if hw else "0")
-                s.setValue("dark_mode", "1" if dark else "0")
             except Exception:  # noqa: BLE001
                 pass
             self.log(f"⚙ 设置已更新：并发 {threads}，"
-                     f"GPU 硬件加速 {'开' if hw else '关'}，"
-                     f"深色模式 {'开' if dark else '关'}")
-            # 应用主题（重建 QSS + 刷新自绘控件）
-            set_dark_theme(dark)
-            self.setStyleSheet(self._build_qss())
-            self._refresh_table()
-            self.table.viewport().update()
+                     f"GPU 硬件加速 {'开' if hw else '关'}")
             # 硬件加速开关变化时清除检测缓存
             from converter.media import reset_hw_cache
             reset_hw_cache()
