@@ -795,6 +795,9 @@ class MainWindow(QMainWindow):
             }}
             QComboBox:hover {{ border-color: {C_PRIMARY}; }}
             QComboBox::drop-down {{ border: none; width: 20px; }}
+            /* 去掉按钮/ComboBox 的焦点虚线框（鼠标点击不需要，输入框保留键盘焦点） */
+            QPushButton:focus, QToolButton:focus, QComboBox:focus,
+            QPushButton:focus:pressed, QToolButton:focus:pressed {{ outline: none; }}
             QToolTip {{ background: {C_TEXT}; color: white; border: none; padding: 6px; }}
         """
 
@@ -835,6 +838,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("剪贴板图片保存失败", 3000)
             return
         self._add_paths([path])
+        # 清空焦点（避免焦点落在「打开目录」等按钮上出现虚线框）
+        self.setFocus(Qt.OtherFocusReason)
         self.log(f"📋 已从剪贴板粘贴图片：{os.path.basename(path)}")
 
     def _check_all(self):
