@@ -501,7 +501,12 @@ class _TaskRunner(QRunnable):
 # ---------------------------------------------------------------------------
 
 class SortableTable(QTableWidget):
-    """行内拖拽排序 + 外部文件拖入转发给主窗口"""
+    """行内拖拽排序 + 外部文件拖入转发给主窗口
+
+    InternalMove 移动 item 后发 internalMoved 信号，让主窗口重建 cellWidget
+    （Qt 已知行为：InternalMove 不移动 cellWidget）"""
+
+    internalMoved = Signal()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -509,6 +514,12 @@ class SortableTable(QTableWidget):
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
         self.setDragDropMode(QAbstractItemView.InternalMove)
+        # 鼠标悬停整行高亮（提示"可交互"）
+        self.setMouseTracking(True)
+        self.setStyleSheet("""
+            QTableView::item:hover { background: #eef2ff; }
+            QTableView { show-decoration-selected: 1; }
+        """)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.source() is self:
@@ -527,8 +538,23 @@ class SortableTable(QTableWidget):
     def dropEvent(self, event: QDropEvent):
         if event.source() is self:
             super().dropEvent(event)
+            self.internalMoved.emit()  # 让主窗口知道内部拖拽完成
         else:
             event.ignore()  # 外部文件拖入 → 冒泡给窗口的 dropEvent
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        # 行上显示拖动手型（视觉提示"可拖拽调整顺序"）
+        row = self.rowAt(event.y())
+        if row >= 0 and self.cursor().shape() != Qt.SizeAllCursor:
+            self.viewport().setCursor(Qt.SizeAllCursor)
+        elif row < 0 and self.cursor().shape() != Qt.ArrowCursor:
+            self.viewport().setCursor(Qt.ArrowCursor)
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        # 离开表格恢复默认光标
+        self.viewport().setCursor(Qt.ArrowCursor)
 
 
 # ---------------------------------------------------------------------------
@@ -684,8 +710,8 @@ class MainWindow(QMainWindow):
         self.table.cellDoubleClicked.connect(self._open_row_location)
         # 选中行时在底部状态栏显示完整信息
         self.table.itemSelectionChanged.connect(self._update_status_bar)
-        # 行内拖拽排序后：同步 tasks 顺序（顺序决定合并 PDF 页码等）
-        self.table.model().rowsMoved.connect(self._on_rows_moved)
+        # 行内拖拽排序后：清空 cellWidget + 重建（保证合并 PDF 页码/转换顺序正确）
+        self.table.internalMoved.connect(self._on_rows_moved)
         self.statusBar().setStyleSheet(
             f"QStatusBar{{background:{C_CARD}; border-top:1px solid {C_BORDER};"
             f"color:{C_TEXT_SUB}; font-size:12px; padding:2px 8px;}}")
@@ -1097,20 +1123,29 @@ class MainWindow(QMainWindow):
         self._update_summary()
         self._sync_header_check()
 
-    def _on_rows_moved(self, *args):
-        """行拖拽排序后：按表格当前顺序重建 tasks（保证合并 PDF 页码、转换顺序正确）"""
-        # rowsMoved 信号在 item 移动后触发，但 cellWidget 不随行移动，
-        # 因此按表格当前 item 顺序重建 tasks 后刷新整表
+    def _on_rows_moved(self):
+        """行拖拽排序完成：按表格当前顺序重建 tasks 并彻底刷新 cellWidget
+
+        关键：InternalMove 移动 item 但 cellWidget 不会跟随——
+        必须清空所有 cellWidget 再 _fill_row，否则会出现空行/错位"""
         if not self.tasks or self.table.rowCount() != len(self.tasks):
             return
-        # 从表格行读取 src 顺序（InternalMove 已把 item 移到新位置）
+        # 1. 从表格当前 item 读取 src 顺序（InternalMove 后 item 已在新位置）
         row_srcs = []
         for r in range(self.table.rowCount()):
             item = self.table.item(r, self.COL_NAME)
             row_srcs.append(item.data(Qt.UserRole) if item else None)
         by_src = {t.src: t for t in self.tasks}
-        self.tasks = [by_src[s] for s in row_srcs if s in by_src]
-        self._refresh_table()  # 重建 cellWidget，避免行内容错位
+        new_tasks = [by_src[s] for s in row_srcs if s in by_src]
+        if len(new_tasks) != len(self.tasks):
+            return  # 安全：顺序与任务不匹配则不重建
+        self.tasks = new_tasks
+        # 2. 彻底清空 cellWidget 和 item（清掉 InternalMove 留下的"错位"widget）
+        self.table.clearContents()
+        # 3. 重新填充整行
+        for row, task in enumerate(self.tasks):
+            self._fill_row(row, task)
+        self._update_summary()
         self.log("↕ 已调整任务顺序")
 
     def _fill_row(self, row: int, task: TaskItem):
@@ -1123,7 +1158,7 @@ class MainWindow(QMainWindow):
         is_dir = os.path.isdir(task.src)
         name = os.path.basename(task.src)
         name_item = QTableWidgetItem(name)
-        name_item.setToolTip(task.src)
+        name_item.setToolTip(f"{task.src}\n\n💡 按住拖动此列可调整任务顺序")
         name_item.setData(Qt.UserRole, task.src)  # 拖拽排序时按此重建 tasks 顺序
         if is_dir:
             name_item.setText("📁 " + name)
